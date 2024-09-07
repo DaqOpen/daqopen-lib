@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+#include = ["*.py"]
+#exclude = ["test*"]
+packages = ["daqopen"]
+
+[project]
+name = "daqopen-lib"
+version = "0.0.1"
+dependencies = [
+    "numpy",
+    "zmq",
+    "pyserial"
+]
+authors = [
+  { name="Michael Oberhofer", email="info@pqopen.com" },
+]
+description = "A data acquisition library for streaming adc data from arduino due and more"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/DaqOpen/daqopen-lib"
+Issues = "https://github.com/DaqOpen/daqopen-lib/issues"
