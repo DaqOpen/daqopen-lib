@@ -96,7 +96,7 @@ myDaq.stop_acquisition()
 
 You should see something like this:
 
-![example-cmd-output](/home/moberhofer/Projekte/DaqOpen/daqopen-lib/docs/ressources/example-cmd-output.png)
+![example-cmd-output](docs/ressources/example-cmd-output.png)
 
 Congratulations!
 
