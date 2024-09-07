@@ -96,7 +96,7 @@ myDaq.stop_acquisition()
 
 You should see something like this:
 
-![image-20240907121256271](/home/moberhofer/snap/typora/90/.config/Typora/typora-user-images/image-20240907121256271.png)
+![example-cmd-output](/home/moberhofer/Projekte/DaqOpen/daqopen-lib/docs/ressources/example-cmd-output.png)
 
 Congratulations!
 
