@@ -1,29 +1,70 @@
+# daqopen/channelbuffer.py
+
 """
-Module: channelbuffer
-Description: module for buffering acquisition and channel data
+Module for buffering acquisition and channel data.
 
-Author: Michael Oberhofer
-Created on: 2023-12-10
-Last Updated: 2023-12-10
+This module provides classes for buffering data acquired from data acquisition systems. It includes 
+`AcqBufferPool` for managing buffers for multiple channels with a single timebase, and `AcqBuffer` 
+for implementing a cyclic buffer for individual channels.
 
-License: MIT
+## Usage
 
-Notes: 
+The primary classes in this module are `AcqBufferPool` and `AcqBuffer`. `AcqBufferPool` facilitates 
+buffering data for multiple channels, allowing for convenient storage and retrieval of both channel 
+data and timestamps. `AcqBuffer` is used for buffering data in a cyclic manner, with support for scaling 
+and delaying the data.
 
-Version: 0.01
-Github: https://github.com/DaqOpen/daqopen-lib/daqopen/
+Examples:
+    Create an `AcqBufferPool` instance and add data with timestamps:
+
+    >>> from channelbuffer import AcqBufferPool
+    >>> my_daq_info = DaqInfo(...)  # Assume this is an initialized DaqInfo object
+    >>> buffer_pool = AcqBufferPool(daq_info=my_daq_info)
+    >>> buffer_pool.put_data_with_timestamp(data_array, timestamp_us=12345678)
+
+Classes:
+    AcqBufferPool: Manages buffers for multiple channels with a single timebase.
+    AcqBuffer: Implements a cyclic buffer for individual channels.
+
 """
+
 import numpy as np
 from modules.daqinfo import DaqInfo
 
 class AcqBufferPool(object):
-    def __init__(self, daq_info: DaqInfo, size: int = 100000, start_timestamp_us: int = 0):
-        """Create AcqBufferPool object for convinient use with more than 1 channel and a single timebase
+    """
+    Manages buffers for multiple channels with a single timebase.
 
-        Args:
-            daq_info (DaqInfo): DaqInfo object from which to create the buffer
-            size (int, optional): Number of samples in the buffer. Defaults to 100000.
-            start_timestamp_us (int, optional): Optional start offset of time buffer. Defaults to 0.
+    `AcqBufferPool` facilitates the buffering of data for more than one channel, all sharing a common 
+    timebase. It provides methods for adding data and timestamps, maintaining synchronization across 
+    channels.
+
+    Attributes:
+        channel: A dictionary mapping channel names to their respective `AcqBuffer` instances.
+        time: Buffer for storing timestamps.
+        actual_sidx: Index of the last sample added to the buffers.
+        _daq_info: Information about the DAQ system, including channel configurations.
+        _buffer_size: Number of samples in the buffer.
+
+    Methods:
+        put_data(data: np.array): Adds data to the channel buffers.
+        add_timestamp(timestamp_us: int, num_samples: int): Adds timestamps to the time buffer.
+        put_data_with_timestamp(data: np.array, timestamp_us: int): Adds channel data and timestamps to the buffers.
+
+    Examples:
+        >>> buffer_pool = AcqBufferPool(daq_info=my_daq_info, size=50000)
+        >>> buffer_pool.put_data_with_timestamp(data_array, timestamp_us=987654321)
+    """
+    def __init__(self, daq_info: DaqInfo, size: int = 100000, start_timestamp_us: int = 0):
+        """Initialize the AcqBufferPool instance for buffering multi-channel data.
+
+        Sets up the buffers for each channel as defined in the provided `DaqInfo` object and 
+        prepares the time buffer for storing timestamps.
+
+        Parameters:
+            daq_info: An instance of `DaqInfo` to configure the channel buffers.
+            size: Number of samples in each buffer.
+            start_timestamp_us: Starting timestamp offset in microseconds.
         """
         self._daq_info = daq_info
         self._buffer_size = size
@@ -32,6 +73,11 @@ class AcqBufferPool(object):
         self.actual_sidx = -1
 
     def _prepare_channel_buffer(self):
+        """Prepare the channel buffers based on the configuration in `daq_info`.
+
+        Creates an `AcqBuffer` for each channel defined in `daq_info`, adjusting for 
+        channel-specific delays and applying gain and offset settings.
+        """
         delay_list = [channel.delay for _,channel in self._daq_info.channel.items()]
         max_delay = max(delay_list)
         self.channel = {}
@@ -43,26 +89,40 @@ class AcqBufferPool(object):
                                                    name=channel_name)
     
     def _prepare_time_buffer(self, start_timestamp: int):
+        """Prepare the time buffer for storing timestamps.
+
+        Initializes the time buffer and sets the starting timestamp. The time buffer is used 
+        to keep track of the timestamps associated with the acquisition data.
+
+        Parameters:
+            start_timestamp: Initial timestamp offset in microseconds.
+        """
         self._last_timestamp_us = start_timestamp
         self._time_batch_array = np.zeros(1)
         self.time = AcqBuffer(self._buffer_size, dtype=np.uint64)
 
     def put_data(self, data: np.array):
-        """Put data into the channel buffer
+        """Add data to the channel buffers.
 
-        Args:
-            data (np.array): samples to add. Number of columns must match the DaqInfo
+        Distributes the provided data across the buffers for each channel. The number of columns 
+        in `data` must match the number of channels defined in `daq_info`.
+
+        Parameters:
+            data: A 2D numpy array where each column corresponds to a channel's data.
         """
         for channel_name, channel_index in self._daq_info.channel_index.items():
             self.channel[channel_name].put_data(data[:,channel_index])
         self.actual_sidx += data.shape[0]
 
     def add_timestamp(self, timestamp_us: int, num_samples: int):
-        """Add timestamps to the time buffer
+        """Add timestamps to the time buffer.
 
-        Args:
-            timestamp_us (int): timestamp of the most recent sample in microseconds
-            num_samples (int): number of samples added
+        Generates a series of timestamps based on the provided `timestamp_us` and `num_samples`, 
+        and stores them in the time buffer.
+
+        Parameters:
+            timestamp_us: Timestamp of the most recent sample in microseconds.
+            num_samples: Number of samples to generate timestamps for.
         """
         if num_samples != self._time_batch_array.shape[0]:
             self._time_batch_array = np.arange(1, num_samples+1)
@@ -70,26 +130,32 @@ class AcqBufferPool(object):
         self._last_timestamp_us = timestamp_us
 
     def put_data_with_timestamp(self, data: np.array, timestamp_us: int):
-        """Put channel data to buffer together with most recent timestamp
+        """Add channel data to the buffers along with the corresponding timestamp.
 
-        Args:
-            data (np.array): samples to add. Number of columns must match the DaqInfo
-            timestamp_us (int): timestamp of the most recent sample in microseconds
+        Adds the provided data to the channel buffers and updates the time buffer with 
+        the given `timestamp_us`.
+
+        Parameters:
+            data: A 2D numpy array where each column corresponds to a channel's data.
+            timestamp_us: Timestamp of the most recent sample in microseconds.
         """
         self.put_data(data)
         self.add_timestamp(timestamp_us, data.shape[0])
 
 class AcqBuffer(object):
-    def __init__(self, size: int=100000, scale_gain=1.0, scale_offset=0.0, sample_delay=0 ,dtype=np.float32, name=None):
-        """Create AcqBuffer object for buffering the acquired data (cyclic buffer)
+    def __init__(self, size: int=100000, scale_gain: float = 1.0, scale_offset: float = 0.0, sample_delay: int = 0, dtype: np.dtype = np.float32, name: str=None):
+        """Initialize the AcqBuffer instance for buffering acquired data in a cyclic manner.
 
-        Args:
-            size (int): Size of the buffer (number of elements). Defaults to 100000.
-            scale_gain (float, optional): Gain scaler which will be applied to the data. Defaults to 1.0.
-            scale_offset (float, optional): Offset which will be applied to the data. Defaults to 0.0.
-            sample_delay (int, optional): Delay the data on read. Defaults to 0.
-            dtype (_type_, optional): Datatype of the resulting np.array. Defaults to np.float32.
-            name (_type_, optional): Name of the buffer instance. Defaults to None.
+        Sets up a cyclic buffer with the specified size, data type, scaling, and offset 
+        properties. Optionally, a sample delay can be specified to adjust data reads.
+
+        Parameters:
+            size: Size of the buffer (number of elements).
+            scale_gain: Gain applied to the data upon storage.
+            scale_offset: Offset applied to the data upon storage.
+            sample_delay: Delay applied to the data during reads.
+            dtype: Datatype of the buffer.
+            name: Optional name for the buffer instance.
         """
         self._data = np.zeros(size, dtype=dtype)
         self.last_write_idx = 0
@@ -100,8 +166,18 @@ class AcqBuffer(object):
         self.last_sample_value = 0
         self.name = name
         
-    def put_data(self, data: np.array):
-        """ Put Data into the buffer
+    def put_data(self, data: np.array) -> int:
+        """Add data to the buffer in a cyclic manner.
+
+        Inserts the provided data into the buffer, applying the configured gain and offset. 
+        If the data size exceeds the available space, the buffer wraps around and overwrites 
+        the oldest data.
+
+        Parameters:
+            data: A numpy array of data to be added to the buffer.
+        
+        Returns:
+            The updated total sample count in the buffer.
         """
         # Split data into two parts if remaining buffer size is smaller than data
         if self.last_write_idx+len(data) > len(self._data):
@@ -117,8 +193,19 @@ class AcqBuffer(object):
         self.last_sample_value = self._data[self.last_write_idx-1]
         return self.sample_count
         
-    def read_data_by_index(self, start_idx: int, stop_idx: int):
-        """ Read data by sample index range. Include start, exclude stop
+    def read_data_by_index(self, start_idx: int, stop_idx: int) -> np.ndarray:
+        """Read data from the buffer by specifying a sample index range.
+
+        Retrieves data from the buffer starting from `start_idx` up to `stop_idx`, 
+        applying the sample delay if configured. The data read may overlap if the indices 
+        wrap around the cyclic buffer.
+
+        Parameters:
+            start_idx: Starting sample index (inclusive).
+            stop_idx: Stopping sample index (exclusive).
+        
+        Returns:
+            An array containing the requested data range. Returns `None` if the indices are out of bounds.
         """
         start_idx -= self.sample_delay
         stop_idx -= self.sample_delay
@@ -135,6 +222,11 @@ class AcqBuffer(object):
             return self._data[start_idx:stop_idx]
 
     def reset(self):
+        """Reset the buffer, clearing all stored data.
+
+        Resets the buffer to its initial state by zeroing out all data and resetting 
+        the write index and sample count.
+        """
         self._data *= 0
         self.last_write_idx = 0
         self.sample_count = 0
