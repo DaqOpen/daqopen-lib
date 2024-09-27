@@ -29,7 +29,7 @@ Classes:
 """
 
 import numpy as np
-from modules.daqinfo import DaqInfo
+from .daqinfo import DaqInfo
 
 class AcqBufferPool(object):
     """
