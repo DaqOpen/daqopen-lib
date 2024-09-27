@@ -125,7 +125,7 @@ class AcqBufferPool(object):
             num_samples: Number of samples to generate timestamps for.
         """
         if num_samples != self._time_batch_array.shape[0]:
-            self._time_batch_array = np.arange(1, num_samples+1)
+            self._time_batch_array = np.arange(0, num_samples) # TODO: Check if 1 must be added or not
         self.time.put_data(self._time_batch_array*(timestamp_us - self._last_timestamp_us)/num_samples+self._last_timestamp_us)
         self._last_timestamp_us = timestamp_us
 
@@ -141,6 +141,21 @@ class AcqBufferPool(object):
         """
         self.put_data(data)
         self.add_timestamp(timestamp_us, data.shape[0])
+
+    def put_data_with_samplerate(self, data: np.array, samplerate: float):
+        """Add channel data to the buffers and extend time axis with sample rate.
+
+        Adds the provided data to the channel buffers and updates the time buffer with 
+        sample converted to a timestamp.
+
+        Parameters:
+            data: A 2D numpy array where each column corresponds to a channel's data.
+            samplerate: Samplerate of the data acquired.
+        """
+        self.put_data(data)
+        timestamp_us = self._last_timestamp_us + data.shape[0]*1e6/samplerate
+        self.add_timestamp(timestamp_us, data.shape[0])
+
 
 class AcqBuffer(object):
     def __init__(self, size: int=100000, scale_gain: float = 1.0, scale_offset: float = 0.0, sample_delay: int = 0, dtype: np.dtype = np.float32, name: str=None):

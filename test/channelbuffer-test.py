@@ -52,5 +52,25 @@ class TestChannelBuffer(unittest.TestCase):
         self.assertIsNone(np.testing.assert_array_equal(data_matrix[10:20,0]*1-1, u1_val))
         self.assertIsNone(np.testing.assert_array_equal(data_matrix[10:20,1]*2-2, u2_val))
 
+    def test_acq_buffer_pool_samplerate(self):
+        # Create DaqInfo Object
+        info_dict = {"samplerate": 10000,
+                    "channel": {"U1": {"gain": 1.0, "offset": 1.0, "delay": 0, "unit": "V", "ad_index": 0},
+                                "U2": {"gain": 2.0, "offset": 2.0, "delay": 0, "unit": "V", "ad_index": 1}}}
+        daq_info = DaqInfo.from_dict(info_dict)
+        # Create Acqusitionbuffer Pool
+        my_acq_pool = AcqBufferPool(daq_info, size=200)
+        # Prepare Data
+        data_matrix = np.ones((100,2))
+        data_matrix[:,0] *= np.arange(100)
+        data_matrix[:,1] *= np.arange(100)
+        time_data = np.arange(0.000, 0.001, step=1.0/daq_info.samplerate)
+        # fill with data
+        my_acq_pool.put_data_with_samplerate(data_matrix, daq_info.samplerate)
+        # read timestamps
+        ts = my_acq_pool.time.read_data_by_index(0,10)
+        # Check values
+        self.assertIsNone(np.testing.assert_array_almost_equal(time_data, ts/1e6))
+
 if __name__ == "__main__":
     unittest.main()
