@@ -34,6 +34,7 @@ Raises:
 """
 
 import serial
+from enum import Enum
 import serial.tools.list_ports
 import time
 import numpy as np
@@ -193,6 +194,23 @@ class DueSerialSim(object):
     def reset_input_buffer(self):
         self._read_buffer = b""
 
+class DueDaqGain(Enum):
+    """ Enumeration for GAIN Setting
+
+    Attributes:
+        SGL_1X: Single Ended Mode Gain = 1x
+        SGL_2X: Single Ended Mode Gain = 2x
+        SGL_4X: Single Ended Mode Gain = 4x
+        DIFF_05X: Differential Mode Gain = 0.5x
+        DIFF_1X: Differential Mode Gain = 1x
+        DIFF_2X: Differential Mode Gain = 2x
+    """
+    SGL_1X = 0x01
+    SGL_2X = 0x02
+    SGL_4X = 0x03
+    DIFF_05X = 0x00
+    DIFF_1X = 0x01
+    DIFF_2X = 0x02
 
 class DueDaq(object):
     """
@@ -256,18 +274,29 @@ class DueDaq(object):
     FRAME_NUM_DT: np.dtype = np.dtype('uint32')
     FRAME_NUM_DT = FRAME_NUM_DT.newbyteorder('<')
     FRAME_NUM_MAX: int = np.iinfo(FRAME_NUM_DT).max
-    ADC_RANGE: list = [-2047, 2048]
+    ADC_RANGE: list = [0, 4095]
     CHANNEL_ORDER: list = ["AD0", "AD2", "AD4", "AD6", "AD10", "AD12"]
-    CHANNEL_PIN_MAPPING: dict = {"AD0": "A7-A6", "AD2": "A5-A4", "AD4": "A3-A2", 
-                           "AD6": "A1-A0", "AD10": "A8-A9", "AD12": "A10-A11"}
+    CHANNEL_PIN_MAPPING_SINGLE: dict = {"AD0": "A7", "AD2": "A5", "AD4": "A3", 
+                                        "AD6": "A1", "AD10": "A8", "AD12": "A10"}
+    CHANNEL_PIN_MAPPING_DIFF: dict = {"AD0": "A7-A6", "AD2": "A5-A4", "AD4": "A3-A2", 
+                                      "AD6": "A1-A0", "AD10": "A8-A9", "AD12": "A10-A11"}
 
-    def __init__(self, reset_pin: int = None, serial_port_name: str = "", sim_packet_generation_delay: float = 0.04):
+    def __init__(self, reset_pin: int = None, 
+                 serial_port_name: str = "", 
+                 differential: bool = False, 
+                 gain: DueDaqGain = DueDaqGain.SGL_1X, 
+                 offset_enabled: bool = False, 
+                 extend_to_int16: bool = False,
+                 sim_packet_generation_delay: float = 0.04):
         """
         Initialize the DueDaq instance.
 
         Parameters:
             reset_pin: GPIO pin number for hardware reset (default: None).
             serial_port_name: Name of the serial port for communication. Use `"SIM"` for simulation mode.
+            differential: When True, differential input mode, otherwise single-ended
+            gain: Gain of ADC input amplifer
+            offset_enabled: Weather offset will be removed before amplification or not
             sim_packet_generation_delay: Delay in seconds for packet generation in simulation mode (default: 0.04).
 
         Notes:
@@ -286,6 +315,10 @@ class DueDaq(object):
 
         self._sim_packet_generation_delay = sim_packet_generation_delay
         self._serial_port_name = serial_port_name
+        self._differential = differential
+        self._gain = gain
+        self._offset_enabled = offset_enabled
+        self._extend_to_int16 = extend_to_int16
         self._init_board()
     
     def _init_board(self):
@@ -310,6 +343,18 @@ class DueDaq(object):
         self._num_frames_read = 0
         self.daq_data = np.zeros((self.NUM_SAMPLES, self.NUM_CH), dtype="int16")
         self._acq_state = "stopped"
+        # Set Input Mode
+        if self._differential:
+            self._serial_port.write(b"SETMODE 1\n")
+        else:
+            self._serial_port.write(b"SETMODE 0\n")
+        # Set Offset Enabled
+        if self._offset_enabled:
+            self._serial_port.write(b"SETOFFSET 1\n")
+        else:
+            self._serial_port.write(b"SETOFFSET 0\n")
+        # Set Gain
+        self._serial_port.write((f"SETGAIN {self._gain.value:d}\n").encode())
         print("DueDaq Init Done")
 
     def _find_serial_port_name(self):
@@ -451,13 +496,20 @@ class DueDaq(object):
         self._read_frame_raw()
         # Detect Spikes (random occurance every few hours of acquisition)
         self._correct_adc_spike()
+        if self._differential:
+            self.daq_data -= self.ADC_RANGE[1]//2 + 1
+
         # Expand to 16 Bit
-        self.daq_data -= self.ADC_RANGE[1]
-        self.daq_data *= 16
-        self.daq_data += 8
-        if not self._serial_port_name == "SIM":
-            # Reduce Crosstalk (Empirically estimated)
-            self.daq_data[:,1] -= (self.daq_data[:,0]/3500).astype(np.int16) # IDX[0] == AD0 IDX[1] == AD2
+        if self._extend_to_int16:
+            if self._differential:
+                self.daq_data *= 16
+                self.daq_data += 8 # Add half of one ADC bit
+            else:
+                self.daq_data *= 8
+            if not self._serial_port_name == "SIM":
+                # Reduce Crosstalk (Empirically estimated)
+                self.daq_data[:,1] -= (self.daq_data[:,0]/3500).astype(np.int16) # IDX[0] == AD0 IDX[1] == AD2
+
         return self.daq_data
 
     def _correct_adc_spike(self):
