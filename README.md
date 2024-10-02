@@ -4,7 +4,7 @@ This library can be used for various data acquisition tasks to proper handle str
 
 Initially, it is build around the Arduino Due, which has a high-speed ADC with good accuracy and a data transfer via USB 2.0. Most of the examples and driver uses this model together with the firmware which can be found in the firmware folder.
 
-Further documentation can be soon found here: docs.daqopen.com
+**Documentation** incl. tutorials can be found here: [docs.daqopen.com](https://docs.daqopen.com)
 
 ## Features
 
