@@ -266,10 +266,14 @@ class DueDaq(object):
         DAQErrorException: for general errors during data acquisition, such as frame number mismatches.
         AcqNotRunningException: if attempting to read data without an active acquisition process.
     """
-    NUM_BYTES: int = 2
-    NUM_CH: int = 6
-    NUM_SAMPLES: int = 2048
-    BLOCKSIZE: int = NUM_BYTES*(NUM_CH*NUM_SAMPLES)+2+4
+    MCLK: int = 84_000_000
+    CONV_CYCLES_PER_SAMPLE: int = 21
+    MAX_SAMPLERATE: int = 1000000
+    MAX_BUFFER_SIZE: int = 20000
+    MIN_BUFFER_SIZE: int = 1000
+    MAX_BUFFER_DURATION: float = 0.05 # maximum size of buffer in seconds
+    NUM_BYTES_PER_SAMPLE: int = 2
+    NUM_BYTES_PKG_CNT: int = 4
     START_PATTERN: bytearray = bytearray.fromhex('FFFF')
     FRAME_NUM_DT: np.dtype = np.dtype('uint32')
     FRAME_NUM_DT = FRAME_NUM_DT.newbyteorder('<')
@@ -280,9 +284,14 @@ class DueDaq(object):
                                         "AD6": "A1", "AD10": "A8", "AD12": "A10"}
     CHANNEL_PIN_MAPPING_DIFF: dict = {"AD0": "A7-A6", "AD2": "A5-A4", "AD4": "A3-A2", 
                                       "AD6": "A1-A0", "AD10": "A8-A9", "AD12": "A10-A11"}
+    CHANNEL_MAPPING: dict = {"A0": 7, "A1": 6, "A2": 5, "A3": 4, "A4": 3, "A5": 2,
+                             "A6": 1, "A7": 0, "A8": 10, "A9": 11, "A10": 12, "A11": 13}
 
-    def __init__(self, reset_pin: int = None, 
-                 serial_port_name: str = "", 
+    def __init__(self,
+                 channels: list[str] = ["A0"], 
+                 reset_pin: int = None, 
+                 serial_port_name: str = "",
+                 samplerate: float = 50000.0, 
                  differential: bool = False, 
                  gain: DueDaqGain = DueDaqGain.SGL_1X, 
                  offset_enabled: bool = False, 
@@ -313,6 +322,8 @@ class DueDaq(object):
                 self._reset_pin = None
                 print("GPIO Library not found - not using the reset pin")
 
+        self._adc_channels = channels
+        self._wanted_samplerate = samplerate
         self._sim_packet_generation_delay = sim_packet_generation_delay
         self._serial_port_name = serial_port_name
         self._differential = differential
@@ -331,6 +342,22 @@ class DueDaq(object):
         Raises:
             DeviceNotFoundException: If the Arduino Due device is not found on any serial port.
         """
+        # Calculate prescaler
+        self._adc_prescal = int(self.MCLK/(self._wanted_samplerate*len(self._adc_channels)*self.CONV_CYCLES_PER_SAMPLE*2)-1)
+        self.samplerate = int(self.MCLK/((1+self._adc_prescal)*2*self.CONV_CYCLES_PER_SAMPLE*len(self._adc_channels)))
+        #self._adc_prescal = int(self.MAX_SAMPLERATE / (self._wanted_samplerate * len(self._adc_channels)))
+        #self.samplerate = self.MAX_SAMPLERATE // self._adc_prescal // len(self._adc_channels)
+        # Calculate optimum buffer size
+        optimum_buffer_size = int(self.samplerate * self.MAX_BUFFER_DURATION * len(self._adc_channels))
+        if (optimum_buffer_size * len(self._adc_channels)) > self.MAX_BUFFER_SIZE:
+            optimum_buffer_size = self.MAX_BUFFER_SIZE
+        if (optimum_buffer_size * len(self._adc_channels)) < self.MIN_BUFFER_SIZE:
+            optimum_buffer_size = self.MIN_BUFFER_SIZE
+        self._samples_per_block_channel = optimum_buffer_size // len(self._adc_channels)
+        self._dma_buffer_size = self._samples_per_block_channel * len(self._adc_channels)
+        # Calculate Blocksize
+        self._buffer_blocksize = self.NUM_BYTES_PER_SAMPLE*(len(self._adc_channels)*self._samples_per_block_channel)+self.NUM_BYTES_PKG_CNT+len(self.START_PATTERN)
+        # Initialize Interface
         if not self._serial_port_name:
             serial_port_name = self._find_serial_port_name() # Update the actual serial port name
         else:
@@ -339,10 +366,19 @@ class DueDaq(object):
             self._serial_port = DueSerialSim(self._sim_packet_generation_delay)
         else:
             self._serial_port = serial.Serial(serial_port_name, timeout=1)
-        self._read_buffer = bytearray(self.BLOCKSIZE)
+        self._read_buffer = bytearray(self._buffer_blocksize)
         self._num_frames_read = 0
-        self.daq_data = np.zeros((self.NUM_SAMPLES, self.NUM_CH), dtype="int16")
+        self.daq_data = np.zeros((self._samples_per_block_channel, len(self._adc_channels)), dtype="int16")
         self._acq_state = "stopped"
+        # Set Samplerate / Prescaler
+        self._serial_port.write((f"SETPRESCAL {self._adc_prescal:d}\n").encode())
+        # Enable Channels
+        cher = 0
+        for ch in self._adc_channels:
+            cher |= 1 << self.CHANNEL_MAPPING[ch]
+        self._serial_port.write((f"SETCHANNEL {cher:d}\n").encode())
+        # Set DMA Buffer Size
+        self._serial_port.write((f"SETDMABUFFERSIZE {self._dma_buffer_size:d}\n").encode())
         # Set Input Mode
         if self._differential:
             self._serial_port.write(b"SETMODE 1\n")
@@ -445,13 +481,13 @@ class DueDaq(object):
         """
         prev_byte = bytes.fromhex('00')
         for i in range(10):
-            self._serial_port.read(self.BLOCKSIZE)
+            self._serial_port.read(self._buffer_blocksize)
         print("DueDaq Search Start")
-        blind_read_bytes = self.BLOCKSIZE
+        blind_read_bytes = self._buffer_blocksize
         while blind_read_bytes:
             data = self._serial_port.read(1)
             if prev_byte+data == self.START_PATTERN:
-                _ = self._serial_port.read(self.BLOCKSIZE - len(self.START_PATTERN))
+                _ = self._serial_port.read(self._buffer_blocksize - len(self.START_PATTERN))
                 break
             prev_byte = data
             blind_read_bytes -= 1
@@ -469,10 +505,10 @@ class DueDaq(object):
         if self._acq_state != "running":
             raise AcqNotRunningException("Can't read frame")
         self._serial_port.readinto(self._read_buffer)
-        if self._read_buffer[:2] != self.START_PATTERN:
+        if self._read_buffer[:len(self.START_PATTERN)] != self.START_PATTERN:
             print('Error Reading Packet')
         # Check if number is increasing
-        frame_num = np.frombuffer(self._read_buffer[2:6], dtype=self.FRAME_NUM_DT)[0]
+        frame_num = np.frombuffer(self._read_buffer[len(self.START_PATTERN):len(self.START_PATTERN)+self.NUM_BYTES_PKG_CNT], dtype=self.FRAME_NUM_DT)[0]
         if self._num_frames_read == 0:
             self._prev_frame_num = frame_num - 1
             self._num_frames_read += 1
@@ -480,7 +516,7 @@ class DueDaq(object):
             raise DAQErrorException(f"{frame_num:d} != {self._prev_frame_num:d}")
         self._num_frames_read += 1
         self._prev_frame_num = frame_num
-        self.daq_data[:] = np.frombuffer(self._read_buffer[6:], dtype='int16').reshape((self.NUM_SAMPLES, self.NUM_CH))
+        self.daq_data[:] = np.frombuffer(self._read_buffer[len(self.START_PATTERN)+self.NUM_BYTES_PKG_CNT:], dtype='int16').reshape((self._samples_per_block_channel, len(self._adc_channels)))
 
     def read_data(self) -> np.ndarray:
         """Read and process a block of data from the DAQ system.
@@ -518,7 +554,7 @@ class DueDaq(object):
         Detects and corrects spikes in the data that may occur due to ADC anomalies. This is important 
         for maintaining data integrity during long-duration acquisitions.
         """
-        for ch_idx in range(self.NUM_CH):
+        for ch_idx in range(len(self._adc_channels)):
             diff = np.diff(self.daq_data[:, ch_idx])
             min_idx = np.argmin(diff)
             max_idx = np.argmax(diff)

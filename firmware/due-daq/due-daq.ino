@@ -31,23 +31,24 @@
   */
 #undef HID_ENABLED
 
-#define buffer_size 6 * 2048  // Define the size of the ADC buffers
-#define start_marker_value 0xFFFF  // Start marker value to indicate data transmission start
+#define MAX_BUFFER_SIZE 20000  // Define the maximum size of the ADC buffers
+#define START_MARKER_VALUE 0xFFFF  // Start marker value to indicate data transmission start
 
 #define RX_LED 72  // Define the pin for RX LED
 #define TX_LED 73  // Define the pin for TX LED
 
-uint8_t protocol_version = 0x01;  // Protocol version
+uint8_t protocol_version = 0x02;  // Protocol version
 String serial_input_buffer;  // Buffer to hold incoming serial data
-uint16_t adc_buffers[2][buffer_size];  // Double buffer for ADC data storage
-uint16_t simulation_buffer[buffer_size];  // Buffer for simulation data (not implemented yet)
+uint16_t adc_buffers[2][MAX_BUFFER_SIZE];  // Double buffer for ADC data storage
 uint16_t start_marker[1];  // Marker indicating the start of ADC data transmission
-const adc_channel_num_t adc_channels[] = {ADC_CHANNEL_0, ADC_CHANNEL_2, ADC_CHANNEL_4, ADC_CHANNEL_6, ADC_CHANNEL_10, ADC_CHANNEL_12};  // Array holding the ADC channels
 volatile uint32_t packet_count = 0, last_packet_count = 0;  // Counters to track packets of ADC data
 bool send_data = false;  // Flag to control whether data should be sent
 bool is_differential = false;  // Variable for the ADC mode (Differential/Single-Ended)
 bool offset_enabled = false;  // Flag to enable or disable offset mode
 uint8_t gain_value = 0x00;  // Default gain (1x)
+uint16_t buffer_size = 20000; // Used size of the buffer
+uint16_t adc_prescal = 1; 
+uint16_t adc_cher = 0x0040; // ADC_CHER_CH6; Enable Channel 6 = A1
 
 /**
  * Interrupt handler for the ADC.
@@ -68,21 +69,21 @@ void ADC_Handler(){
  * Configure the ADC hardware and start continuous conversions.
  */
 void configureADC(){
-  pmc_enable_periph_clk(ID_ADC);  // Enable ADC peripheral clock
-  adc_init(ADC, SystemCoreClock, ADC_FREQ_MAX, ADC_STARTUP_FAST);  // Initialize the ADC
-  NVIC_EnableIRQ(ADC_IRQn);  // Enable ADC interrupts
-  adc_disable_all_channel(ADC);  // Disable all ADC channels initially
-  
-  ADC->ADC_MR |= 0x80;  // Enable free-running mode for continuous ADC conversions
-  bitSet(ADC->ADC_MR, 10);  // Set ADC clock to approximately 48 kHz per channel
-  ADC->ADC_CHER = 0x1455;  // Enable specific ADC channels (CH0, CH2, CH4, CH6, CH10, CH12)
-  
-  configureADCMode();  // Configure the ADC mode (Differential/Single-Ended)
-  configureADCGain();  // Set the gain for the ADC channels
-  
-  adc_configure_sequence(ADC, adc_channels, 6);  // Configure ADC conversion sequence
-  ADC->ADC_IDR = ~(1 << 27);  // Disable all ADC interrupts except the RX buffer complete interrupt
-  ADC->ADC_IER = 1 << 27;  // Enable the RX buffer complete interrupt
+    PMC->PMC_PCER1 |= PMC_PCER1_PID37;                    // ADC power ON
+
+  ADC->ADC_CR = ADC_CR_SWRST;                           // Reset ADC
+  ADC->ADC_MR |=  ADC_MR_TRGEN_DIS                      // Free Running Mode selected
+                  | ADC_MR_FREERUN
+                  | ADC_MR_PRESCAL(adc_prescal);                  // Or PRESCAL (1) to reduce ADC frequency to 21 MHz
+
+  ADC->ADC_ACR = ADC_ACR_IBCTL(0b01);                   // For frequencies > 500 KHz
+
+  ADC->ADC_IER = ADC_IER_ENDRX;                         // End Of Conversion interrupt enable for channel 7
+  NVIC_EnableIRQ(ADC_IRQn);                             // Enable ADC interrupt
+  ADC->ADC_CHER = adc_cher;
+  ADC->ADC_COR = 0xFFFF0000;
+  ADC->ADC_CGR = 0x55555555;
+  //ADC->ADC_COR = ADC_COR_DIFF0;
 }
 
 /**
@@ -92,13 +93,13 @@ void configureADC(){
 void configureADCMode() {
   if (is_differential && !offset_enabled) {
     // Set channels to differential mode without offset correction
-    ADC->ADC_COR = 0x14550000;
+    ADC->ADC_COR = 0xFFFF0000;
   } else if (is_differential && offset_enabled) {
     // Set channels to differential mode with offset correction
-    ADC->ADC_COR = 0x14551455;
+    ADC->ADC_COR = 0xFFFFFFFF;
   } else if (!is_differential && offset_enabled) {
     // Set channels to single-ended mode with offset correction
-    ADC->ADC_COR = 0x00001455;
+    ADC->ADC_COR = 0x0000FFFF;
   } else {
     // Set channels to single-ended mode without offset correction
     ADC->ADC_COR = 0x00000000;
@@ -111,12 +112,8 @@ void configureADCMode() {
  */
 void configureADCGain() {
   // Set the gain value for each enabled ADC channel
-  ADC->ADC_CGR = (gain_value << 0) |   // Gain for CH0
-                 (gain_value << 2) |   // Gain for CH2
-                 (gain_value << 4) |   // Gain for CH4
-                 (gain_value << 6) |   // Gain for CH6
-                 (gain_value << 10) |  // Gain for CH10
-                 (gain_value << 12);   // Gain for CH12
+  uint32_t gain_mask = 0x55555555;
+  ADC->ADC_CGR = gain_mask * gain_value;
 }
 
 /**
@@ -175,7 +172,7 @@ void setup(){
   
   SerialUSB.begin(0);  // Begin SerialUSB communication
   while(!SerialUSB);  // Wait for SerialUSB to be ready
-  start_marker[0] = start_marker_value;  // Set start marker
+  start_marker[0] = START_MARKER_VALUE;  // Set start marker
   
   configureADC();  // Configure ADC
   configureDMA();  // Configure DMA
@@ -236,6 +233,27 @@ void loop(){
         offset_enabled = true;
       }
       restartADC();  // Restart the ADC to apply offset changes
+    }
+    else if (serial_input_buffer.startsWith("SETPRESCAL")) {
+      // Enable or disable offset mode
+      int prescal = serial_input_buffer.substring(11).toInt();  // Get the prescaler value after "SETPRESCAL"
+      if (prescal >= 1 && prescal <= 255) {
+        adc_prescal = prescal;
+        restartADC();  // Restart the ADC to apply offset changes
+      }
+    }
+    else if (serial_input_buffer.startsWith("SETCHANNEL")) {
+      // Enable or disable offset mode
+      adc_cher = serial_input_buffer.substring(11).toInt();  // Get the channel enable value after "SETCHANNEL"
+      restartADC();  // Restart the ADC to apply offset changes
+    }
+    else if (serial_input_buffer.startsWith("SETDMABUFFERSIZE")) {
+      // Enable or disable offset mode
+      uint16_t dma_buffer_size = serial_input_buffer.substring(17).toInt();  // Get the prescaler value after "SETDMABUFFERSIZE"
+      if (dma_buffer_size >= 1000 && dma_buffer_size <= MAX_BUFFER_SIZE) {
+        buffer_size = dma_buffer_size;
+        restartADC();  // Restart the ADC to apply offset changes
+      }
     }
   }
 
