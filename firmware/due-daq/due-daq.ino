@@ -81,9 +81,6 @@ void configureADC(){
   ADC->ADC_IER = ADC_IER_ENDRX;                         // End Of Conversion interrupt enable for channel 7
   NVIC_EnableIRQ(ADC_IRQn);                             // Enable ADC interrupt
   ADC->ADC_CHER = adc_cher;
-  ADC->ADC_COR = 0xFFFF0000;
-  ADC->ADC_CGR = 0x55555555;
-  //ADC->ADC_COR = ADC_COR_DIFF0;
 }
 
 /**
