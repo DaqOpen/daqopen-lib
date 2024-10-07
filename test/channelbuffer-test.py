@@ -28,14 +28,15 @@ class TestChannelBuffer(unittest.TestCase):
 
     def test_acq_buffer_pool(self):
         # Create DaqInfo Object
-        info_dict = {"samplerate": 48000,
-                    "channel": {"U1": {"gain": 1.0, "offset": 1.0, "delay": 0, "unit": "V", "ad_index": 0},
-                                "U2": {"gain": 2.0, "offset": 2.0, "delay": 0, "unit": "V", "ad_index": 1}}}
+        info_dict = {
+                    "board": {"samplerate": 48000},
+                    "channel": {"U1": {"gain": 1.0, "offset": 1.0, "delay": 0, "unit": "V", "ai_pin": "A0"},
+                                "U2": {"gain": 2.0, "offset": 2.0, "delay": 0, "unit": "V", "ai_pin": "A1"}}}
         daq_info = DaqInfo.from_dict(info_dict)
         # Take actual time as starttime
         start_timestamp_us = int(time.time()*1e6)
         # Create Acqusitionbuffer Pool
-        my_acq_pool = AcqBufferPool(daq_info, size=200, start_timestamp_us=start_timestamp_us)
+        my_acq_pool = AcqBufferPool(daq_info, data_columns={"A0": 0, "A1": 1}, size=200, start_timestamp_us=start_timestamp_us)
         self.assertEqual(my_acq_pool.channel["U1"].sample_delay, 0)
         data_matrix = np.ones((100,2))
         data_matrix[:,0] *= np.arange(100)
@@ -43,7 +44,7 @@ class TestChannelBuffer(unittest.TestCase):
         # fill with data
         my_acq_pool.put_data(data_matrix)
         # timestamp at most recent sample
-        ts_us = int(start_timestamp_us+1e6*data_matrix.shape[0]/daq_info.samplerate)
+        ts_us = int(start_timestamp_us+1e6*data_matrix.shape[0]/daq_info.board.samplerate)
         my_acq_pool.add_timestamp(ts_us, data_matrix.shape[0])
         # read values
         u1_val = my_acq_pool.channel["U1"].read_data_by_index(10,20)
@@ -54,19 +55,20 @@ class TestChannelBuffer(unittest.TestCase):
 
     def test_acq_buffer_pool_samplerate(self):
         # Create DaqInfo Object
-        info_dict = {"samplerate": 10000,
-                    "channel": {"U1": {"gain": 1.0, "offset": 1.0, "delay": 0, "unit": "V", "ad_index": 0},
-                                "U2": {"gain": 2.0, "offset": 2.0, "delay": 0, "unit": "V", "ad_index": 1}}}
+        info_dict = {
+                    "board": {"samplerate": 10000},
+                    "channel": {"U1": {"gain": 1.0, "offset": 1.0, "delay": 0, "unit": "V", "ai_pin": "A0"},
+                                "U2": {"gain": 2.0, "offset": 2.0, "delay": 0, "unit": "V", "ai_pin": "A1"}}}
         daq_info = DaqInfo.from_dict(info_dict)
         # Create Acqusitionbuffer Pool
-        my_acq_pool = AcqBufferPool(daq_info, size=200)
+        my_acq_pool = AcqBufferPool(daq_info, data_columns={"A0": 0, "A1": 1}, size=200)
         # Prepare Data
         data_matrix = np.ones((100,2))
         data_matrix[:,0] *= np.arange(100)
         data_matrix[:,1] *= np.arange(100)
-        time_data = np.arange(0.000, 0.001, step=1.0/daq_info.samplerate)
+        time_data = np.arange(0.000, 0.001, step=1.0/daq_info.board.samplerate)
         # fill with data
-        my_acq_pool.put_data_with_samplerate(data_matrix, daq_info.samplerate)
+        my_acq_pool.put_data_with_samplerate(data_matrix, daq_info.board.samplerate)
         # read timestamps
         ts = my_acq_pool.time.read_data_by_index(0,10)
         # Check values

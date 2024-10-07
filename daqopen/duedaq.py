@@ -38,6 +38,7 @@ from enum import Enum
 import serial.tools.list_ports
 import time
 import numpy as np
+from typing import Union
 
 class DeviceNotFoundException(Exception):
     """Exception raised when the DAQ device cannot be found by its Vendor ID (VID) and Product ID (PID).
@@ -222,20 +223,28 @@ class DueDaq(object):
     it supports simulated data acquisition for testing purposes.
 
     Attributes:
-        NUM_BYTES: Number of bytes per data sample.
-        NUM_CH: Number of channels available for data acquisition.
-        NUM_SAMPLES: Number of samples per data frame.
-        BLOCKSIZE: Size of each data block for a single frame.
+        MCLK: MCU Clock Frequency
+        CONV_CYCLES_PER_SAMPLE: Clock Cycles per conversation
+        MAX_BUFFER_SIZE: Maximum DMA Buffer Size for ADC cyclic buffer in cumulated samples
+        MIN_BUFFER_SIZE: Minimum DMA Buffer Size for ADC cyclic buffer in cumulated samples
+        MAX_BUFFER_DURATION: Maximum equivalent time duration of buffer for responisveness
+        NUM_BYTES_PER_SAMPLE: Number of bytes per data sample.
+        NUM_BYTES_PKG_CNT: Number of bytes of package counter.
         START_PATTERN: Byte pattern marking the start of a data frame.
         FRAME_NUM_DT: Data type for frame number, with little-endian byte order.
         FRAME_NUM_MAX: Maximum value for the frame number.
         ADC_RANGE: Range of the ADC values for normalization.
-        CHANNEL_ORDER: List of channel names in acquisition order.
-        CHANNEL_PIN_MAPPING: Mapping of channel names to their corresponding physical pins.
+        CHANNEL_MAPPING: Mapping of channel names to their corresponding physical pins.
 
     Parameters:
+        channels: List if channels to be acquired
         reset_pin: GPIO pin number for hardware reset (default: None).
         serial_port_name: Name of the serial port for communication. Use `"SIM"` for simulation mode.
+        samplerate: Wanted samplerate of acquisition (per channel). Can't be guranteed.
+        differential: Enable or disable the differential mode of the analog input
+        gain: Set the input amplification of the integrated stage
+        offset_enabled: Enable or disable, if the offset should be removed before amplification (only for single ended)
+        extend_to_int16: If true, expand the data to 16-Bit range and perform crosstalk compensation (experimental)
         sim_packet_generation_delay: Delay in seconds for packet generation in simulation mode (default: 0.04).
 
     Methods:
@@ -268,7 +277,6 @@ class DueDaq(object):
     """
     MCLK: int = 84_000_000
     CONV_CYCLES_PER_SAMPLE: int = 21
-    MAX_SAMPLERATE: int = 1000000
     MAX_BUFFER_SIZE: int = 20000
     MIN_BUFFER_SIZE: int = 1000
     MAX_BUFFER_DURATION: float = 0.05 # maximum size of buffer in seconds
@@ -279,13 +287,9 @@ class DueDaq(object):
     FRAME_NUM_DT = FRAME_NUM_DT.newbyteorder('<')
     FRAME_NUM_MAX: int = np.iinfo(FRAME_NUM_DT).max
     ADC_RANGE: list = [0, 4095]
-    CHANNEL_ORDER: list = ["AD0", "AD2", "AD4", "AD6", "AD10", "AD12"]
-    CHANNEL_PIN_MAPPING_SINGLE: dict = {"AD0": "A7", "AD2": "A5", "AD4": "A3", 
-                                        "AD6": "A1", "AD10": "A8", "AD12": "A10"}
-    CHANNEL_PIN_MAPPING_DIFF: dict = {"AD0": "A7-A6", "AD2": "A5-A4", "AD4": "A3-A2", 
-                                      "AD6": "A1-A0", "AD10": "A8-A9", "AD12": "A10-A11"}
     CHANNEL_MAPPING: dict = {"A0": 7, "A1": 6, "A2": 5, "A3": 4, "A4": 3, "A5": 2,
                              "A6": 1, "A7": 0, "A8": 10, "A9": 11, "A10": 12, "A11": 13}
+    CHANNEL_ORDER: list = ["A{:d}".format(idx) for idx in range(12)]
 
     def __init__(self,
                  channels: list[str] = ["A0"], 
@@ -293,7 +297,7 @@ class DueDaq(object):
                  serial_port_name: str = "",
                  samplerate: float = 50000.0, 
                  differential: bool = False, 
-                 gain: DueDaqGain = DueDaqGain.SGL_1X, 
+                 gain: str | DueDaqGain = DueDaqGain.SGL_1X,
                  offset_enabled: bool = False, 
                  extend_to_int16: bool = False,
                  sim_packet_generation_delay: float = 0.04):
@@ -301,11 +305,14 @@ class DueDaq(object):
         Initialize the DueDaq instance.
 
         Parameters:
+            channels: List if channels to be acquired
             reset_pin: GPIO pin number for hardware reset (default: None).
             serial_port_name: Name of the serial port for communication. Use `"SIM"` for simulation mode.
+            samplerate: Wanted samplerate of acquisition (per channel). Can't be guranteed.
             differential: When True, differential input mode, otherwise single-ended
             gain: Gain of ADC input amplifer
             offset_enabled: Weather offset will be removed before amplification or not
+            extend_to_int16: If true, expand the data to 16-Bit range and perform crosstalk compensation (experimental)
             sim_packet_generation_delay: Delay in seconds for packet generation in simulation mode (default: 0.04).
 
         Notes:
@@ -327,9 +334,12 @@ class DueDaq(object):
         self._sim_packet_generation_delay = sim_packet_generation_delay
         self._serial_port_name = serial_port_name
         self._differential = differential
+        if not isinstance(gain, DueDaqGain):
+            gain = DueDaqGain[gain]
         self._gain = gain
         self._offset_enabled = offset_enabled
         self._extend_to_int16 = extend_to_int16
+        self.data_columns = {channel_name: self.CHANNEL_ORDER.index(channel_name) for channel_name in channels}
         self._init_board()
     
     def _init_board(self):
@@ -345,8 +355,6 @@ class DueDaq(object):
         # Calculate prescaler
         self._adc_prescal = int(self.MCLK/(self._wanted_samplerate*len(self._adc_channels)*self.CONV_CYCLES_PER_SAMPLE*2)-1)
         self.samplerate = int(self.MCLK/((1+self._adc_prescal)*2*self.CONV_CYCLES_PER_SAMPLE*len(self._adc_channels)))
-        #self._adc_prescal = int(self.MAX_SAMPLERATE / (self._wanted_samplerate * len(self._adc_channels)))
-        #self.samplerate = self.MAX_SAMPLERATE // self._adc_prescal // len(self._adc_channels)
         # Calculate optimum buffer size
         optimum_buffer_size = int(self.samplerate * self.MAX_BUFFER_DURATION * len(self._adc_channels))
         if (optimum_buffer_size * len(self._adc_channels)) > self.MAX_BUFFER_SIZE:

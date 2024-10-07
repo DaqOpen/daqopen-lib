@@ -21,8 +21,8 @@ Examples:
     >>> info_dict = {
     >>>     "samplerate": 48000,
     >>>     "channel": {
-    >>>         "U1": {"gain": 1.0, "offset": 1.0, "delay": 1, "unit": "V", "ad_index": 0},
-    >>>         "U2": {"gain": 2.0, "offset": 2.0, "delay": 2, "unit": "V", "ad_index": 1}
+    >>>         "U1": {"gain": 1.0, "offset": 1.0, "delay": 1, "unit": "V", "ai_pin": "A0"},
+    >>>         "U2": {"gain": 2.0, "offset": 2.0, "delay": 2, "unit": "V", "ai_pin": "A1"}
     >>>     }
     >>> }
     >>> myDaqInfo = DaqInfo.from_dict(info_dict)
@@ -50,16 +50,25 @@ class InputInfo:
         offset: The offset applied to the input channel.
         delay: The delay in sample periods for this channel.
         unit: The unit of the measurement.
-        ad_index: The index of the analog-to-digital converter channel.
+        ai_pin: The Due pin name e.g. "A0".
 
     Examples:
-        >>> input_info = InputInfo(gain=2.0, offset=1.0, delay=5, unit="V", ad_index=0)
+        >>> input_info = InputInfo(gain=2.0, offset=1.0, delay=5, unit="V", ai_pin="A0")
     """
     gain: float = 1.0
     offset: float = 0.0
     delay: int = 0
     unit: str = "V"
-    ad_index: int = -1
+    ai_pin: str = ""
+
+@dataclass
+class BoardInfo:
+    """ Represents the configuration of board properties
+    """
+    samplerate: float
+    differential: bool = False
+    gain: str = "SGL_1X"
+    offset_enabled: bool = False
 
 class DaqInfo(object):
     """Represents the configuration of the data acquisition (DAQ) system.
@@ -71,7 +80,7 @@ class DaqInfo(object):
     Attributes:
         samplerate: The sampling rate of the DAQ system in Hz.
         channel: A dictionary of `InputInfo` objects, keyed by channel name.
-        channel_index: Maps channel names to their analog-to-digital (AD) indices.
+        ai_pin_name: Maps channel names to their analog-to-digital (AD) indices.
         channel_name: Maps AD indices to channel names.
 
     Methods:
@@ -83,15 +92,17 @@ class DaqInfo(object):
 
     Examples:
         >>> info_dict = {
-        >>>     "samplerate": 48000,
+        >>>     "board": {
+        >>>         "samplerate": 48000
+        >>>     },
         >>>     "channel": {
-        >>>         "U1": {"gain": 1.0, "offset": 1.0, "delay": 1, "unit": "V", "ad_index": 0},
-        >>>         "U2": {"gain": 2.0, "offset": 2.0, "delay": 2, "unit": "V", "ad_index": 1}
+        >>>         "U1": {"gain": 1.0, "offset": 1.0, "delay": 1, "unit": "V", "ai_pin": "A0"},
+        >>>         "U2": {"gain": 2.0, "offset": 2.0, "delay": 2, "unit": "V", "ai_pin": "A1"}
         >>>     }
         >>> }
         >>> myDaqInfo = DaqInfo.from_dict(info_dict)
     """
-    def __init__(self, samplerate: float, channel_info: Dict[str, InputInfo]):
+    def __init__(self, board_info: BoardInfo, channel_info: Dict[str, InputInfo]):
         """Initialize the DaqInfo instance with the specified sampling rate and channel information.
 
         Sets up the DAQ configuration, mapping channel names to their analog-to-digital (AD) indices 
@@ -103,17 +114,21 @@ class DaqInfo(object):
 
         Examples:
             >>> channel_info = {
-            >>>     "U1": InputInfo(gain=1.0, offset=1.0, delay=1, unit="V", ad_index=0),
-            >>>     "U2": InputInfo(gain=2.0, offset=2.0, delay=2, unit="V", ad_index=1)
+            >>>     "U1": InputInfo(gain=1.0, offset=1.0, delay=1, unit="V", ai_pin="A0"),
+            >>>     "U2": InputInfo(gain=2.0, offset=2.0, delay=2, unit="V", ai_pin="A1")
             >>> }
-            >>> daq_info = DaqInfo(samplerate=48000, channel_info=channel_info)
+            >>> board_info = BoardInfo(samplerate=50000)
+            >>> daq_info = DaqInfo(board_info=board_info, channel_info=channel_info)
         """
-        self.samplerate = samplerate
-        self.channel_index = {}
+        self.board = board_info
+        self.ai_pin_name = {}
         self.channel_name = {}
         for ch_name, ch_info in channel_info.items():
-            self.channel_index[ch_name] = ch_info.ad_index
-            self.channel_name[ch_info.ad_index] = ch_name
+            if ch_info.ai_pin:
+                self.ai_pin_name[ch_name] = ch_info.ai_pin
+            else:
+                self.ai_pin_name[ch_name] = ch_name
+            self.channel_name[self.ai_pin_name[ch_name]] = ch_name
         self.channel = channel_info
 
     @classmethod
@@ -130,45 +145,27 @@ class DaqInfo(object):
         Notes:
             Expected format:
                 {
-                    "samplerate": float,
+                    "board" : {
+                        "samplerate": float
+                    }
                     "channel": {
                         "ChannelName": {
                             "gain": float,
                             "offset": float,
                             "delay": int,
                             "unit": str,
-                            "ad_index": int
+                            "ai_pin": int
                         },
                         ...
                     }
                 }
 
         """
+        board_info = BoardInfo(**data["board"])
         channel_info = {}
-        channel_index = {}
         for ch_name, ch_info in data["channel"].items():
-            channel_info[ch_name] = InputInfo(gain=ch_info["gain"], offset=ch_info["offset"], delay=ch_info["delay"], unit=ch_info["unit"], ad_index = ch_info["ad_index"])
-        return cls(samplerate=data["samplerate"], channel_info=channel_info)
-
-    @classmethod
-    def from_binary(cls, data: bytes):
-        """Create a DaqInfo instance from binary data.
-
-    Parses binary data to extract DAQ configuration information, including the sampling rate 
-    and input channel configurations. The binary format is defined by a specific structure, 
-    with each channel described by a fixed set of fields.
-
-    Parameters:
-        data: Binary data containing DAQ configuration.
-    """
-        channel_info = {}
-        samplerate = struct.unpack_from("d", data, 0)[0]
-        ch_data_struct = struct.Struct("4sffb4s")
-        num_channels = (len(data) - 8) // ch_data_struct.size
-        for idx in range(num_channels):
-            name, gain, offset, delay, unit = ch_data_struct.unpack_from(data, 8+idx*ch_data_struct.size)
-            channel_info[name.decode().replace("\x00","")] = InputInfo(gain=gain, offset=offset, delay=delay, unit=unit.decode().replace("\x00",""), ad_index = idx)
-        return cls(samplerate=samplerate, channel_info=channel_info)
+            channel_info[ch_name] = InputInfo(gain=ch_info["gain"], offset=ch_info["offset"], delay=ch_info["delay"], unit=ch_info["unit"], ai_pin = ch_info["ai_pin"])
+        return cls(board_info=board_info, channel_info=channel_info)
 
     def to_dict(self) -> dict:
         """Convert the DaqInfo instance into a dictionary.
@@ -182,7 +179,7 @@ class DaqInfo(object):
         channel_info = {}
         for ch_name, ch_info in self.channel.items():
             channel_info[ch_name] = ch_info.__dict__
-        return {"samplerate": self.samplerate, "channel": channel_info}
+        return {"board": self.board.__dict__, "channel": channel_info}
 
     def apply_sensor_to_channel(self, ch_name: str, sensor_info: InputInfo):
         """Apply sensor configuration to a specific channel.
@@ -205,34 +202,6 @@ class DaqInfo(object):
         self.channel[ch_name].delay += sensor_info.delay
         self.channel[ch_name].unit = sensor_info.unit
 
-    def to_binary(self) -> bytes:
-        """Convert the DaqInfo instance into binary format.
-
-        Serializes the DAQ configuration, including the sampling rate and channel information, 
-        into a binary format. This binary representation can be used for compact storage or 
-        transmission.
-
-        Returns:
-            Binary data representing the `DaqInfo` instance.
-
-        Examples:
-            >>> daq_info = DaqInfo(...)
-            >>> binary_data = daq_info.to_binary()
-        """
-        binary_data = struct.pack("d", self.samplerate)
-        for idx in range(max(self.channel_index.values())+1):
-            if idx in self.channel_name:
-                ch_name = self.channel_name[idx]
-                gain = self.channel[ch_name].gain
-                offset = self.channel[ch_name].offset
-                delay = self.channel[ch_name].delay
-                unit = self.channel[ch_name].unit
-                channel_data = struct.pack("4sffb4s", ch_name.encode(), gain, offset, delay, unit.encode())
-            else:
-                channel_data = struct.pack("4sffb4s", b"", 1.0, 0.0, 0, b"")
-            binary_data += channel_data
-        return binary_data
-
     def __str__(self) -> str:
         """Return a string representation of the DaqInfo instance.
 
@@ -247,18 +216,13 @@ class DaqInfo(object):
             >>> print(str(daq_info))
             DaqInfo(samplerate=48000)
         """
-        return f"{self.__class__.__name__}(samplerate={self.samplerate})"
-
+        return f"{self.__class__.__name__}(samplerate={self.board.samplerate})"    
 
 if __name__ == "__main__":
 
     info_dict = {"samplerate": 48000,
-                 "channel": {"U1": {"gain": 1.0, "offset": 1.0, "delay": 1, "unit": "V", "ad_index": 0},
-                             "U2": {"gain": 2.0, "offset": 2.0, "delay": 2, "unit": "V", "ad_index": 1}}}
+                 "channel": {"U1": {"gain": 1.0, "offset": 1.0, "delay": 1, "unit": "V", "ai_pin": "A0"},
+                             "U2": {"gain": 2.0, "offset": 2.0, "delay": 2, "unit": "V", "ai_pin": "A1"}}}
     myDaqInfo = DaqInfo.from_dict(info_dict)
     myDaqInfo.apply_sensor_to_channel("U1", InputInfo(2, 1, 0))
     print(myDaqInfo.to_dict())
-    binary_repr = myDaqInfo.to_binary()
-    print(len(binary_repr))
-    myNewDaqInfo = DaqInfo.from_binary(binary_repr)
-    print(myNewDaqInfo.to_dict())

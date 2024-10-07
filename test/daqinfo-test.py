@@ -5,15 +5,20 @@ import os
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 
-from daqopen.daqinfo import DaqInfo, InputInfo
+from daqopen.daqinfo import DaqInfo, InputInfo, BoardInfo
 
 class TestDaqInfo(unittest.TestCase):
     def test_from_dict_to_dict(self):
         input_data = {
-            "samplerate": 1000.0,
+            "board": {
+                "samplerate": 1000.0,
+                "differential": True,
+                "gain": "SGL_X1",
+                "offset_enabled": True
+            },
             "channel": {
-                "ch1": {"gain": 2.0, "offset": 1.0, "delay": 10, "unit": "A", "ad_index": 0},
-                "ch2": {"gain": 1.5, "offset": 0.5, "delay": 5, "unit": "V", "ad_index": 1},
+                "ch1": {"gain": 2.0, "offset": 1.0, "delay": 10, "unit": "A", "ai_pin": "A0"},
+                "ch2": {"gain": 1.5, "offset": 0.5, "delay": 5, "unit": "V", "ai_pin": "A1"},
             },
         }
 
@@ -26,7 +31,7 @@ class TestDaqInfo(unittest.TestCase):
         sensor_info = InputInfo(gain=0.5, offset=2.0, delay=3)
 
         daq_info = DaqInfo(
-            samplerate=1000.0,
+            board_info=BoardInfo(samplerate=10000),
             channel_info={
                 "ch1": InputInfo(gain=2.0, offset=1.0, delay=10),
                 "ch2": InputInfo(gain=1.5, offset=0.5, delay=5),

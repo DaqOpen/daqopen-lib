@@ -49,6 +49,7 @@ uint8_t gain_value = 0x00;  // Default gain (1x)
 uint16_t buffer_size = 20000; // Used size of the buffer
 uint16_t adc_prescal = 1; 
 uint16_t adc_cher = 0x0040; // ADC_CHER_CH6; Enable Channel 6 = A1
+const adc_channel_num_t adc_channels[] = {ADC_CHANNEL_7, ADC_CHANNEL_6, ADC_CHANNEL_5, ADC_CHANNEL_4, ADC_CHANNEL_3, ADC_CHANNEL_2, ADC_CHANNEL_1, ADC_CHANNEL_0, ADC_CHANNEL_10, ADC_CHANNEL_11, ADC_CHANNEL_12, ADC_CHANNEL_13};
 
 /**
  * Interrupt handler for the ADC.
@@ -81,6 +82,7 @@ void configureADC(){
   ADC->ADC_IER = ADC_IER_ENDRX;                         // End Of Conversion interrupt enable for channel 7
   NVIC_EnableIRQ(ADC_IRQn);                             // Enable ADC interrupt
   ADC->ADC_CHER = adc_cher;
+  adc_configure_sequence(ADC, adc_channels, 12);
 }
 
 /**

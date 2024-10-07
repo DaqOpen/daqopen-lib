@@ -30,6 +30,7 @@ Classes:
 
 import numpy as np
 from .daqinfo import DaqInfo
+from copy import deepcopy
 
 class AcqBufferPool(object):
     """
@@ -55,7 +56,7 @@ class AcqBufferPool(object):
         >>> buffer_pool = AcqBufferPool(daq_info=my_daq_info, size=50000)
         >>> buffer_pool.put_data_with_timestamp(data_array, timestamp_us=987654321)
     """
-    def __init__(self, daq_info: DaqInfo, size: int = 100000, start_timestamp_us: int = 0):
+    def __init__(self, daq_info: DaqInfo, data_columns: dict, size: int = 100000,  start_timestamp_us: int = 0):
         """Initialize the AcqBufferPool instance for buffering multi-channel data.
 
         Sets up the buffers for each channel as defined in the provided `DaqInfo` object and 
@@ -66,7 +67,13 @@ class AcqBufferPool(object):
             size: Number of samples in each buffer.
             start_timestamp_us: Starting timestamp offset in microseconds.
         """
-        self._daq_info = daq_info
+
+        self._daq_info = deepcopy(daq_info)
+        # Keep only channels which are present in the data_column dict
+        for channel_name, input_info in daq_info.channel.items():
+            if input_info.ai_pin not in data_columns:
+                self._daq_info.channel.pop(channel_name)
+        self._data_columns = data_columns
         self._buffer_size = size
         self._prepare_channel_buffer()
         self._prepare_time_buffer(start_timestamp_us)
@@ -110,8 +117,8 @@ class AcqBufferPool(object):
         Parameters:
             data: A 2D numpy array where each column corresponds to a channel's data.
         """
-        for channel_name, channel_index in self._daq_info.channel_index.items():
-            self.channel[channel_name].put_data(data[:,channel_index])
+        for channel_name, input_info in self._daq_info.channel.items():
+            self.channel[channel_name].put_data(data[:,self._data_columns[input_info.ai_pin]])
         self.actual_sidx += data.shape[0]
 
     def add_timestamp(self, timestamp_us: int, num_samples: int):
