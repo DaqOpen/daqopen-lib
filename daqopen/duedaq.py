@@ -339,7 +339,12 @@ class DueDaq(object):
         self._gain = gain
         self._offset_enabled = offset_enabled
         self._extend_to_int16 = extend_to_int16
-        self.data_columns = {channel_name: self.CHANNEL_ORDER.index(channel_name) for channel_name in channels}
+        # Create map of ai_pin vs. data column index
+        data_column = 0
+        for ai_name in self.CHANNEL_ORDER:
+            if ai_name in channels:
+                self.data_columns[ai_name] = data_column
+                data_column += 1
         self._init_board()
     
     def _init_board(self):
@@ -419,25 +424,6 @@ class DueDaq(object):
                 print(f"Device found on Port: {port.device:s}")
                 return port.device
         raise DeviceNotFoundException("DueDaq")
-
-    def _get_input_info(self):
-        """Read the information about the inputs stored in the EEPROM.
-
-        This is a placeholder method for future implementation to read configuration or 
-        calibration data stored in the EEPROM of the Arduino Due.
-        """
-        pass
-
-    def _set_input_info(self, data):
-        """Store the given data to the EEPROM.
-
-        This is a placeholder method for future implementation to store configuration or 
-        calibration data to the EEPROM of the Arduino Due.
-
-        Parameters:
-            data: The data to be stored in the EEPROM.
-        """
-        pass
 
     def start_acquisition(self):
         """Start the data acquisition process.
@@ -538,13 +524,13 @@ class DueDaq(object):
         # TODO: Channel Delay Compensation -> not part of this class        
         # Read Frame in Buffer
         self._read_frame_raw()
-        # Detect Spikes (random occurance every few hours of acquisition)
-        self._correct_adc_spike()
         if self._differential:
             self.daq_data -= self.ADC_RANGE[1]//2 + 1
 
         # Expand to 16 Bit
         if self._extend_to_int16:
+            # Detect Spikes (random occurance every few hours of acquisition)
+            self._correct_adc_spike()
             if self._differential:
                 self.daq_data *= 16
                 self.daq_data += 8 # Add half of one ADC bit
