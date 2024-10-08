@@ -341,6 +341,7 @@ class DueDaq(object):
         self._extend_to_int16 = extend_to_int16
         # Create map of ai_pin vs. data column index
         data_column = 0
+        self.data_columns = {}
         for ai_name in self.CHANNEL_ORDER:
             if ai_name in channels:
                 self.data_columns[ai_name] = data_column
