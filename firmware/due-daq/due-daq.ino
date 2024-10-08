@@ -79,10 +79,10 @@ void configureADC(){
 
   ADC->ADC_ACR = ADC_ACR_IBCTL(0b01);                   // For frequencies > 500 KHz
 
+  //adc_configure_sequence(ADC, adc_channels, 12);
   ADC->ADC_IER = ADC_IER_ENDRX;                         // End Of Conversion interrupt enable for channel 7
   NVIC_EnableIRQ(ADC_IRQn);                             // Enable ADC interrupt
   ADC->ADC_CHER = adc_cher;
-  adc_configure_sequence(ADC, adc_channels, 12);
 }
 
 /**

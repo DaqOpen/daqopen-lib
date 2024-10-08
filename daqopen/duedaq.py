@@ -289,7 +289,7 @@ class DueDaq(object):
     ADC_RANGE: list = [0, 4095]
     CHANNEL_MAPPING: dict = {"A0": 7, "A1": 6, "A2": 5, "A3": 4, "A4": 3, "A5": 2,
                              "A6": 1, "A7": 0, "A8": 10, "A9": 11, "A10": 12, "A11": 13}
-    CHANNEL_ORDER: list = ["A{:d}".format(idx) for idx in range(12)]
+    CHANNEL_ORDER: list = [ai_pin for ai_pin, ai_mcu in sorted(CHANNEL_MAPPING.items(), key=lambda item: item[1])]
 
     def __init__(self,
                  channels: list[str] = ["A0"], 
