@@ -65,6 +65,7 @@ class InputInfo:
 class BoardInfo:
     """ Represents the configuration of board properties
     """
+    type: str
     samplerate: float
     differential: bool = False
     gain: str = "SGL_1X"

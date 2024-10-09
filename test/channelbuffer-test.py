@@ -29,7 +29,7 @@ class TestChannelBuffer(unittest.TestCase):
     def test_acq_buffer_pool(self):
         # Create DaqInfo Object
         info_dict = {
-                    "board": {"samplerate": 48000},
+                    "board": {"type": "duedaq", "samplerate": 48000},
                     "channel": {"U1": {"gain": 1.0, "offset": 1.0, "delay": 0, "unit": "V", "ai_pin": "A0"},
                                 "U2": {"gain": 2.0, "offset": 2.0, "delay": 0, "unit": "V", "ai_pin": "A1"}}}
         daq_info = DaqInfo.from_dict(info_dict)
@@ -56,7 +56,7 @@ class TestChannelBuffer(unittest.TestCase):
     def test_acq_buffer_pool_samplerate(self):
         # Create DaqInfo Object
         info_dict = {
-                    "board": {"samplerate": 10000},
+                    "board": {"type": "duedaq", "samplerate": 10000},
                     "channel": {"U1": {"gain": 1.0, "offset": 1.0, "delay": 0, "unit": "V", "ai_pin": "A0"},
                                 "U2": {"gain": 2.0, "offset": 2.0, "delay": 0, "unit": "V", "ai_pin": "A1"}}}
         daq_info = DaqInfo.from_dict(info_dict)

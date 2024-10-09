@@ -51,6 +51,18 @@ uint16_t adc_prescal = 1;
 uint16_t adc_cher = 0x0040; // ADC_CHER_CH6; Enable Channel 6 = A1
 const adc_channel_num_t adc_channels[] = {ADC_CHANNEL_7, ADC_CHANNEL_6, ADC_CHANNEL_5, ADC_CHANNEL_4, ADC_CHANNEL_3, ADC_CHANNEL_2, ADC_CHANNEL_1, ADC_CHANNEL_0, ADC_CHANNEL_10, ADC_CHANNEL_11, ADC_CHANNEL_12, ADC_CHANNEL_13};
 
+void configurePWM() {
+  // PWM Set-up on pin: PB14
+  REG_PMC_PCER1 |= PMC_PCER1_PID36;                     // Enable PWM peripheral
+  REG_PIOB_ABSR |= PIO_ABSR_P14;                        // Set PWM pin peripheral type A or B, in this case B for PB14
+  REG_PIOB_PDR |= PIO_PDR_P14;                          // Set PWM pin to an output (disable PIO control on PB14)
+  REG_PWM_CLK = PWM_CLK_PREA(0) | PWM_CLK_DIVA(1);      // Set the PWM clock rate to 84MHz (84MHz/1) 
+  REG_PWM_CMR2 = PWM_CMR_CPRE_CLKA;                     // Enable single slope PWM and set the clock source as CLKA for Channel 2 (PB14 is PWM Channel 2)
+  REG_PWM_CPRD2 = 8400;                                 // Set the PWM frequency 84MHz/10kHz = 8400 
+  REG_PWM_CDTY2 = 4200;                                 // Set the PWM duty cycle 50% (8400/2=4200)
+  REG_PWM_ENA = PWM_ENA_CHID2;                          // Enable the PWM channel 2                          // Enable the PWM channel     
+}
+
 /**
  * Interrupt handler for the ADC.
  * Called when the ADC finishes a data conversion.
@@ -253,6 +265,10 @@ void loop(){
         buffer_size = dma_buffer_size;
         restartADC();  // Restart the ADC to apply offset changes
       }
+    }
+    else if (serial_input_buffer.startsWith("ENABLEPWM")) {
+      // Enable experimental 10 kHz output for external charge pump on D53
+      configurePWM();      
     }
   }
 
