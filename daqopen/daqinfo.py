@@ -165,7 +165,13 @@ class DaqInfo(object):
         board_info = BoardInfo(**data["board"])
         channel_info = {}
         for ch_name, ch_info in data["channel"].items():
-            channel_info[ch_name] = InputInfo(gain=ch_info["gain"], offset=ch_info["offset"], delay=ch_info["delay"], unit=ch_info["unit"], ai_pin = ch_info["ai_pin"])
+            if not ch_info.get("enabled", True):
+                continue
+            channel_info[ch_name] = InputInfo(gain=ch_info.get("gain", 1.0), 
+                                              offset=ch_info.get("offset", 0.0), 
+                                              delay=ch_info.get("delay", 0), 
+                                              unit=ch_info.get("unit","V"), 
+                                              ai_pin = ch_info.get("ai_pin",""))
         return cls(board_info=board_info, channel_info=channel_info)
 
     def to_dict(self) -> dict:
