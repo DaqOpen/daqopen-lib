@@ -129,6 +129,7 @@ class DaqInfo(object):
                 self.ai_pin_name[ch_name] = ch_info.ai_pin
             else:
                 self.ai_pin_name[ch_name] = ch_name
+                ch_info.ai_pin = ch_name
             self.channel_name[self.ai_pin_name[ch_name]] = ch_name
         self.channel = channel_info
 
