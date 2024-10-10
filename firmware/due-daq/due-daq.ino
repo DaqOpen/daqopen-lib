@@ -151,6 +151,8 @@ void restartADC() {
   
   // Reconfigure the ADC and DMA
   configureADC();
+  configureADCGain();
+  configureADCMode();
   configureDMA();
 }
 
