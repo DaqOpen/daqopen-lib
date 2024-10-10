@@ -38,7 +38,9 @@ from enum import Enum
 import serial.tools.list_ports
 import time
 import numpy as np
-from typing import Union
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DeviceNotFoundException(Exception):
     """Exception raised when the DAQ device cannot be found by its Vendor ID (VID) and Product ID (PID).
@@ -187,7 +189,7 @@ class DueSerialSim(object):
     def readinto(self, buffer: bytearray = 0):
         if self._actual_state == "started":
             if self._read_buffer:
-                print("Warning - Buffer not empty before new fillup:", len(self._read_buffer))
+                logger.warning(f"Warning - Buffer not empty before new fillup: {len(self._read_buffer)}")
             self._generate_frame()
             buffer[:] = self._read_buffer[:]
             self._read_buffer = b""
@@ -327,7 +329,7 @@ class DueDaq(object):
                 GPIO.setup(self._reset_pin, GPIO.OUT, initial=GPIO.HIGH)
             except:
                 self._reset_pin = None
-                print("GPIO Library not found - not using the reset pin")
+                logger.warning("GPIO Library not found - not using the reset pin")
 
         self._adc_channels = channels
         self._wanted_samplerate = samplerate
@@ -405,7 +407,7 @@ class DueDaq(object):
             self._serial_port.write(b"SETOFFSET 0\n")
         # Set Gain
         self._serial_port.write((f"SETGAIN {self._gain.value:d}\n").encode())
-        print("DueDaq Init Done")
+        logger.info("DueDaq Init Done")
 
     def _find_serial_port_name(self):
         """Find the serial port name of the connected Arduino Due device.
@@ -422,7 +424,7 @@ class DueDaq(object):
         ports_avail = serial.tools.list_ports.comports()
         for port in ports_avail:
             if port.vid == 0x2341 and port.pid == 0x003e:
-                print(f"Device found on Port: {port.device:s}")
+                logger.info(f"Device found on Port: {port.device:s}")
                 return port.device
         raise DeviceNotFoundException("DueDaq")
 
@@ -437,10 +439,10 @@ class DueDaq(object):
         time.sleep(0.1)
         self._serial_port.reset_input_buffer()
         self._num_frames_read = 0
-        print("DueDaq Wait for Frame Start")
+        logger.info("DueDaq Wait for Frame Start")
         self._wait_for_frame_start()
         self._acq_state = "running"
-        print("DueDaq ACQ Started")
+        logger.info("DueDaq ACQ Started")
 
     def stop_acquisition(self):
         """Stop the data acquisition process.
@@ -452,6 +454,7 @@ class DueDaq(object):
         time.sleep(0.1)
         self._serial_port.reset_input_buffer()
         self._acq_state = "stopped"
+        logger.info("DueDaq ACQ Stopped")
 
     def hard_reset(self):
         """Perform a hardware reset of the DAQ system using the specified reset pin.
@@ -477,7 +480,7 @@ class DueDaq(object):
         prev_byte = bytes.fromhex('00')
         for i in range(10):
             self._serial_port.read(self._buffer_blocksize)
-        print("DueDaq Search Start")
+        logger.info("DueDaq Search Start")
         blind_read_bytes = self._buffer_blocksize
         while blind_read_bytes:
             data = self._serial_port.read(1)
@@ -501,7 +504,7 @@ class DueDaq(object):
             raise AcqNotRunningException("Can't read frame")
         self._serial_port.readinto(self._read_buffer)
         if self._read_buffer[:len(self.START_PATTERN)] != self.START_PATTERN:
-            print('Error Reading Packet')
+            logger.error('Error Reading Packet')
         # Check if number is increasing
         frame_num = np.frombuffer(self._read_buffer[len(self.START_PATTERN):len(self.START_PATTERN)+self.NUM_BYTES_PKG_CNT], dtype=self.FRAME_NUM_DT)[0]
         if self._num_frames_read == 0:
