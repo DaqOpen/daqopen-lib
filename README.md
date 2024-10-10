@@ -43,19 +43,27 @@ pip install -e .
 
 ```python
 from daqopen.duedaq import DueDaq
+import matplotlib.pyplot as plt
 
 # Create Instance of DueDaq
-myDaq = DueDaq(serial_port_name="SIM", sim_packet_generation_delay=0.1)
+myDaq = DueDaq(serial_port_name="SIM")
 
 # Start acquisition device
 myDaq.start_acquisition()
+
+# Read the buffer 10 times
 for i in range(10):
-    data = myDaq.read_data() # read buffer
-    print(data)
+    data = myDaq.read_data()
 
 # Hold acqusition device
 myDaq.stop_acquisition()
+
+# Plot Data of last buffer
+plt.plot(data)
+plt.show()
 ```
+
+![image-20241010124001678](ressources/sim-first-acq.png)
 
 
 
@@ -80,24 +88,28 @@ Now, connect the "Native USB Port" (the port near the reset toggle) and use the 
 
 ```python
 from daqopen.duedaq import DueDaq
+import matplotlib.pyplot as plt
 
 # Create Instance of DueDaq (use empty port name for automatic search)
-myDaq = DueDaq(serial_port_name="", sim_packet_generation_delay=0.1)
+myDaq = DueDaq()
 
 # Start acquisition device
 myDaq.start_acquisition()
 for i in range(10):
     data = myDaq.read_data() # read buffer
-    print(data)
 
 # Hold acqusition device
 myDaq.stop_acquisition()
+
+# Plot Data of last buffer
+plt.plot(data)
+plt.show()
 ```
 
 You should see something like this:
 
-![example-cmd-output](docs/ressources/example-cmd-output.png)
+![my-first-acq-1](ressources/my-first-acq-1.png)
 
 Congratulations!
 
-See [daqopen-apps](https://github.com/DaqOpen/daqopen-apps) repository for more examples
+For more Examples see [docs.daqopen.com](https://docs.daqopen.com)
