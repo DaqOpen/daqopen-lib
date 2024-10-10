@@ -11,6 +11,7 @@ class TestDaqInfo(unittest.TestCase):
     def test_from_dict_to_dict(self):
         input_data = {
             "board": {
+                "type": "duedaq",
                 "samplerate": 1000.0,
                 "differential": True,
                 "gain": "SGL_X1",
@@ -31,7 +32,7 @@ class TestDaqInfo(unittest.TestCase):
         sensor_info = InputInfo(gain=0.5, offset=2.0, delay=3)
 
         daq_info = DaqInfo(
-            board_info=BoardInfo(samplerate=10000),
+            board_info=BoardInfo(type="duedaq", samplerate=10000),
             channel_info={
                 "ch1": InputInfo(gain=2.0, offset=1.0, delay=10),
                 "ch2": InputInfo(gain=1.5, offset=0.5, delay=5),

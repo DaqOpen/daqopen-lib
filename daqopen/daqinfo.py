@@ -110,7 +110,7 @@ class DaqInfo(object):
         and vice versa. Stores the input channel configurations provided in `channel_info`.
 
         Parameters:
-            samplerate: The sampling rate of the DAQ system in Hz.
+            board_info: The board info as instance of BoardInfo.
             channel_info: A dictionary mapping channel names to `InputInfo` instances.
 
         Examples:

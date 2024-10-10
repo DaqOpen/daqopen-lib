@@ -96,15 +96,21 @@ class DueSerialSim(object):
     software testing without the need for actual hardware.
 
     Attributes:
-        NUM_BYTES: Number of bytes per data sample.
-        NUM_CH: Number of channels available for data acquisition.
-        NUM_SAMPLES: Number of samples per data frame.
-        BLOCKSIZE: Size of each data block for a single frame.
+        MCLK: MCU Clock Frequency
+        CONV_CYCLES_PER_SAMPLE: Clock Cycles per conversation
+        MAX_BUFFER_SIZE: Maximum DMA Buffer Size for ADC cyclic buffer in cumulated samples
+        MIN_BUFFER_SIZE: Minimum DMA Buffer Size for ADC cyclic buffer in cumulated samples
+        MAX_BUFFER_DURATION: Maximum equivalent time duration of buffer for responisveness
+        NUM_BYTES_PER_SAMPLE: Number of bytes per data sample.
+        NUM_BYTES_PKG_CNT: Number of bytes of package counter.
         START_PATTERN: Byte pattern marking the start of a data frame.
-        FRAME_NUM_DT: Data type for frame number with little-endian byte order.
+        FRAME_NUM_DT: Data type for frame number, with little-endian byte order.
+        FRAME_NUM_MAX: Maximum value for the frame number.
+        ADC_RANGE: Range of the ADC values for normalization.
+        CHANNEL_MAPPING: Mapping of channel names to their corresponding physical pins.
 
     Parameters:
-        packet_generation_delay: Delay in seconds for simulating packet generation (default: 0).
+        realtime: Enable or disable the realtime simulation.
 
     Methods:
         write: Simulates writing commands to the DAQ system (e.g., "START", "STOP").
@@ -115,14 +121,22 @@ class DueSerialSim(object):
     Notes:
         Please do not use this class directly, instead use the `DueDaq` with `serial_port_name = "SIM"`
     """
-    NUM_BYTES: int = 2
-    NUM_CH: int = 6
-    NUM_SAMPLES: int = 2048
-    BLOCKSIZE: int = NUM_BYTES*(NUM_CH*NUM_SAMPLES)+2+4
+    MCLK: int = 84_000_000
+    CONV_CYCLES_PER_SAMPLE: int = 21
+    MAX_BUFFER_SIZE: int = 20000
+    MIN_BUFFER_SIZE: int = 1000
+    NUM_BYTES_PER_SAMPLE: int = 2
+    NUM_BYTES_PKG_CNT: int = 4
     START_PATTERN: bytearray = bytearray.fromhex('FFFF')
     FRAME_NUM_DT: np.dtype = np.dtype('uint32')
     FRAME_NUM_DT = FRAME_NUM_DT.newbyteorder('<')
-    def __init__(self, packet_generation_delay: float = 0):
+    FRAME_NUM_MAX: int = np.iinfo(FRAME_NUM_DT).max
+    ADC_RANGE: list = [0, 4095]
+    CHANNEL_MAPPING: dict = {"A0": 7, "A1": 6, "A2": 5, "A3": 4, "A4": 3, "A5": 2,
+                             "A6": 1, "A7": 0, "A8": 10, "A9": 11, "A10": 12, "A11": 13}
+    CHANNEL_ORDER: list = [ai_pin for ai_pin, ai_mcu in sorted(CHANNEL_MAPPING.items(), key=lambda item: item[1])]
+    
+    def __init__(self, realtime: bool = True):
         """Initialize the DueSerialSim instance for simulating data acquisition.
 
         This constructor sets up the simulation environment for the Arduino Due DAQ system. 
@@ -130,41 +144,63 @@ class DueSerialSim(object):
         delay between data packet generations.
 
         Parameters:
-            packet_generation_delay: The delay in seconds for simulating the generation of 
-                                     data packets. This can be used to mimic the timing 
-                                     characteristics of the actual hardware (default: 0).
+            realtime: Enable or disable the realtime simulation. If True, realtime is enabled and the
+                      timing should be similar to the real board. Otherwise, it works as fast as possible.
 
         Attributes:
-            _packet_generation_delay: The delay between packet generations.
             response_data: Placeholder for response data, initialized as an empty byte string.
             _frame_number: Counter to keep track of the frame number.
             _actual_statr: Current state of the simulator, either "started" or "stopped".
             _read_buffer: Buffer to store generated frames for reading.
         """
-        self._packet_generation_delay = packet_generation_delay
+        self._realtime = realtime
         self.response_data = b""
         self._frame_number = 0
         self._actual_state = "stopped"
-        self._pre_generate_signal()
         self._read_buffer = b""
+        # Initialitze attributes for ADC
+        self._is_differential = False
+        self._gain_value = 0
+        self._offset_enabled = False
+        self._adc_prescal = 1
+        self._adc_cher = 0x0040
+        self._channels = ["A1"]
+        self._buffer_size = self.MAX_BUFFER_SIZE
+        self._samplerate = 0
+        self._samples_per_block_channel = self._buffer_size
 
-    def _pre_generate_signal(self):
-        index = np.arange(0, self.NUM_SAMPLES)
-        main_signal = np.clip(np.sin(2*np.pi*index/self.NUM_SAMPLES) * 2048 + 2048, 0, 4095)
-        main_signal[int(self.NUM_SAMPLES/4)] = 0 # Insert Spike for testing
-        self._signal_buffer = np.zeros((self.NUM_SAMPLES, self.NUM_CH), dtype="int16")
-        for i in range(self.NUM_CH):
-            self._signal_buffer[:,i] = main_signal
-        #._signal_buffer = self._signal_buffer.flatten()
+    def _cher_to_channels(self, cher: int) -> list:
+        channels = []
+        for ch, bit_pos in self.CHANNEL_MAPPING.items():
+            if cher & (1 << bit_pos):
+                channels.append(ch)
+        return channels
+
+    def _setup_fake_adc(self):
+        self._samplerate = int(self.MCLK/((1+self._adc_prescal)*2*self.CONV_CYCLES_PER_SAMPLE*len(self._channels)))
+        self._samples_per_block_channel = self._buffer_size // len(self._channels)
+        self._signal_buffer = np.zeros((self._samples_per_block_channel, len(self._channels)), dtype="int16")
+        # Generate Signal
+        index = np.arange(0, self._samples_per_block_channel)
+        main_signal = np.clip(np.sin(2*np.pi*index/self._samples_per_block_channel) * 2048 + 2048, 0, 4095)
+        #main_signal[int(self.NUM_SAMPLES/4)] = 0 # Insert Spike for testing
+        for i in range(len(self._channels)):
+            self._signal_buffer[:,i] = main_signal/(1.0+i) # attenuate following channels data        
 
     def _generate_frame(self):
-        time.sleep(self._packet_generation_delay)
+        if self._realtime:
+            time.sleep(self._samples_per_block_channel/self._samplerate)
         self._frame_number += 1
         frame = self.START_PATTERN+np.array([self._frame_number], dtype=self.FRAME_NUM_DT).tobytes()
         frame += self._signal_buffer.tobytes()
         self._read_buffer = frame
 
     def write(self, data: bytes):
+        """ Fake serial write endpoint. Receive commands and act
+
+        Arguments:
+            data: data to be written by client
+        """
         if data == b"START\n":
             self._actual_state = "started"
             self._frame_number = 0
@@ -172,8 +208,37 @@ class DueSerialSim(object):
             self._actual_state = "stopped"
         elif data == b"RESET\n":
             pass
+        elif b"SETMODE" in data:
+            value = data.decode().split(" ")[1]
+            if value == "0":
+                self._is_differential = False
+            elif value == "1":
+                self._is_differential = True
+        elif b"SETGAIN" in data:
+            value = int(data.decode().split(" ")[1])
+            if 0 <= value <= 3:
+                self._gain_value = value
+        elif b"SETOFFSET" in data:
+            value = data.decode().split(" ")[1]
+            if value == "0":
+                self._offset_enabled = False
+            elif value == "1":
+                self._offset_enabled = True
+        elif b"SETPRESCAL" in data:
+            value = int(data.decode().split(" ")[1])
+            if 1 <= value <= 255:
+                self._adc_prescal = value
+        elif b"SETCHANNEL" in data:
+            value = int(data.decode().split(" ")[1])
+            self._adc_cher = value
+            self._channels = self._cher_to_channels(self._adc_cher)
+        elif b"SETDMABUFFERSIZE" in data:
+            value = int(data.decode().split(" ")[1])
+            if self.MIN_BUFFER_SIZE <= value <= self.MAX_BUFFER_SIZE:
+                self._buffer_size = value
         else:
             pass
+        self._setup_fake_adc()
 
     def read(self, length: int = 0):
         if len(self._read_buffer) < length and self._actual_state == "started":
