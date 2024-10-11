@@ -32,6 +32,7 @@ Classes:
 
 import numpy as np
 import zmq
+from daqopen.daqinfo import DaqInfo
 
 
 class DaqPublisher(object):
@@ -57,17 +58,19 @@ class DaqPublisher(object):
         >>> publisher.terminate()
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 50001, daq_info: dict = {}):
+    def __init__(self, daq_info: DaqInfo, data_columns: dict, host: str = "127.0.0.1", port: int = 50001):
         """Initialize the DaqPublisher instance.
 
         Sets up a ZeroMQ PUB socket to publish data to the specified host and port.
 
         Parameters:
+            daq_info: The DaqInfo Object to be published.
+            data_columns: The column to channel map.
             host: The IP address to bind the publisher to.
             port: The port number to bind the publisher to.
-            daq_info: A dictionary containing DAQ configuration information.
         """
-        self._daq_info = daq_info
+        self._daq_info = daq_info.to_dict()
+        self._data_columns = data_columns
         self.zmq_context = zmq.Context()
         self.sock = self.zmq_context.socket(zmq.PUB)
         self.sock.bind(f"tcp://{host:s}:{port:d}")
@@ -100,6 +103,7 @@ class DaqPublisher(object):
             dtype = str(m_data.dtype),
             shape = m_data.shape,
             daq_info = self._daq_info,
+            data_columns = self._data_columns,
             packet_num = packet_num,
             sync_status = sync_status
         )
@@ -127,7 +131,7 @@ class DaqSubscriber(object):
         >>> subscriber.terminate()
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 50001):
+    def __init__(self, host: str = "127.0.0.1", port: int = 50001, init_daqinfo: bool = True):
         """Initialize the DaqSubscriber instance.
 
         Sets up a ZeroMQ SUB socket to receive data from the specified host and port.
@@ -140,8 +144,15 @@ class DaqSubscriber(object):
         self.sock = self.zmq_context.socket(zmq.SUB)
         self.sock.setsockopt_string(zmq.SUBSCRIBE, "")
         self.sock.connect(f"tcp://{host:s}:{port:d}")
+        self.timestamp: float = -1
+        self.daq_info: DaqInfo
+        self.data_columns: dict = {}
+        self.packet_num: int = -1
+        self.sync_status: bool = False
+        if init_daqinfo:
+            self.recv_data(update_daqinfo=True) # Read one packet to update metadata
 
-    def recv_data(self) -> tuple[dict, np.ndarray]:
+    def recv_data(self, update_daqinfo : bool = False) -> np.ndarray:
         """Receive a numpy array along with its metadata.
 
         Waits for incoming data and metadata from the publisher, reconstructing the numpy array 
@@ -151,13 +162,21 @@ class DaqSubscriber(object):
             A tuple containing metadata (dict) and the received numpy array.
 
         Examples:
-            >>> metadata, data = subscriber.recv_data()
+            >>> data = subscriber.recv_data()
         """
         metadata = self.sock.recv_json(flags=0)
         msg = self.sock.recv(flags=0, copy=True, track=False)
         buf = memoryview(msg)
         daq_data = np.frombuffer(buf, dtype=metadata['dtype'])
-        return metadata, daq_data.reshape(metadata['shape'])
+        # Update attributes
+        self.timestamp = metadata["timestamp"]
+        self.packet_num = metadata["packet_num"]
+        self.sync_status = metadata["sync_status"]
+        if update_daqinfo:
+            self.daq_info = DaqInfo.from_dict(metadata["daq_info"])
+            self.data_columns = metadata["data_columns"]
+        # Return data array
+        return daq_data.reshape(metadata['shape'])
 
     def terminate(self):
         """Terminate the subscriber by closing the socket and destroying the context.
