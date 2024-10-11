@@ -175,6 +175,15 @@ class DaqInfo(object):
                                               ai_pin = ch_info.get("ai_pin",""))
         return cls(board_info=board_info, channel_info=channel_info)
 
+    @classmethod
+    def get_default(cls):
+        """Create a default DaqInfo Object
+
+        """
+        board_info = BoardInfo(type="default", samplerate=0)
+        channel_info = {}
+        return cls(board_info=board_info, channel_info=channel_info)
+
     def to_dict(self) -> dict:
         """Convert the DaqInfo instance into a dictionary.
 
@@ -225,6 +234,7 @@ class DaqInfo(object):
             DaqInfo(samplerate=48000)
         """
         return f"{self.__class__.__name__}(samplerate={self.board.samplerate})"    
+
 
 if __name__ == "__main__":
 

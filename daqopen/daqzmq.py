@@ -32,8 +32,11 @@ Classes:
 
 import numpy as np
 import zmq
+import logging
+import time
 from daqopen.daqinfo import DaqInfo
 
+logger = logging.getLogger(__name__)
 
 class DaqPublisher(object):
     """Publishes ADC data and metadata over a ZeroMQ socket.
@@ -130,8 +133,9 @@ class DaqSubscriber(object):
         >>> metadata, data = subscriber.recv_data()
         >>> subscriber.terminate()
     """
+    NUM_CONNECT_RETRIES: int = 5
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 50001, init_daqinfo: bool = True):
+    def __init__(self, host: str = "127.0.0.1", port: int = 50001, init_daqinfo: bool = True, connect_timeout: float = 1.0):
         """Initialize the DaqSubscriber instance.
 
         Sets up a ZeroMQ SUB socket to receive data from the specified host and port.
@@ -145,14 +149,23 @@ class DaqSubscriber(object):
         self.sock.setsockopt_string(zmq.SUBSCRIBE, "")
         self.sock.connect(f"tcp://{host:s}:{port:d}")
         self.timestamp: float = -1
-        self.daq_info: DaqInfo
+        self.daq_info: DaqInfo = DaqInfo.get_default()
         self.data_columns: dict = {}
         self.packet_num: int = -1
         self.sync_status: bool = False
         if init_daqinfo:
-            self.recv_data(update_daqinfo=True) # Read one packet to update metadata
+            for read_try in range(self.NUM_CONNECT_RETRIES):
+                try:
+                    self.recv_data(update_daqinfo=True, flags=zmq.NOBLOCK) # Read one packet to update metadata
+                    break
+                except zmq.ZMQError:
+                    logger.warning("Initial receive of data failed")
+                time.sleep(connect_timeout/self.NUM_CONNECT_RETRIES)
+            else:
+                raise ConnectionError
 
-    def recv_data(self, update_daqinfo : bool = False) -> np.ndarray:
+
+    def recv_data(self, update_daqinfo : bool = False, flags = 0) -> np.ndarray:
         """Receive a numpy array along with its metadata.
 
         Waits for incoming data and metadata from the publisher, reconstructing the numpy array 
@@ -164,8 +177,8 @@ class DaqSubscriber(object):
         Examples:
             >>> data = subscriber.recv_data()
         """
-        metadata = self.sock.recv_json(flags=0)
-        msg = self.sock.recv(flags=0, copy=True, track=False)
+        metadata = self.sock.recv_json(flags=flags)
+        msg = self.sock.recv(flags=flags, copy=True, track=False)
         buf = memoryview(msg)
         daq_data = np.frombuffer(buf, dtype=metadata['dtype'])
         # Update attributes
