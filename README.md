@@ -26,7 +26,7 @@ This library should be used if:
 Installation from pypi:
 
 ```bash
-pip install daqopen
+pip install daqopen-lib
 ```
 
 Install latest directly from Github:
