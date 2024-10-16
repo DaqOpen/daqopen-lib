@@ -2,7 +2,7 @@
 
 """Module for transferring ADC data via ZeroMQ.
 
-This module provides classes for publishing and subscribing to ADC (Analog-to-Digital Converter) 
+This module provides classes for publishing and subscribing to DAQ devices
 data using ZeroMQ sockets. It enables efficient data transfer over a network, allowing for real-time 
 communication between data acquisition systems and client applications.
 
@@ -48,10 +48,10 @@ class DaqPublisher(object):
     Attributes:
         zmq_context: The ZeroMQ context for managing socket connections.
         sock: The ZeroMQ PUB socket for data transmission.
-        _daq_info: A dictionary containing DAQ configuration information.
+        _daq_info (dict): A dictionary containing DAQ configuration information.
+        _data_columns (dict): A dictionary mapping data columns to DAQ channels.
 
     Methods:
-        publishObject(data): Publishes a Python object using ZeroMQ.
         send_data(m_data, packet_num, timestamp, sync_status): Sends measurement data and metadata.
         terminate(): Closes the ZeroMQ socket and destroys the context.
 
@@ -67,10 +67,10 @@ class DaqPublisher(object):
         Sets up a ZeroMQ PUB socket to publish data to the specified host and port.
 
         Parameters:
-            daq_info: The DaqInfo Object to be published.
-            data_columns: The column to channel map.
-            host: The IP address to bind the publisher to.
-            port: The port number to bind the publisher to.
+            daq_info: The DAQ configuration to be published.
+            data_columns: A dictionary mapping data columns to DAQ channels.
+            host: The IP address (or hostname) to bind the publisher to (default: "127.0.0.1").
+            port: The port number to bind the publisher to (default: 50001).
         """
         self._daq_info = daq_info.to_dict()
         self._data_columns = data_columns
@@ -123,6 +123,11 @@ class DaqSubscriber(object):
     Attributes:
         zmq_context: The ZeroMQ context for managing socket connections.
         sock: The ZeroMQ SUB socket for data reception.
+        timestamp (float): The timestamp of the last received data packet.
+        daq_info (DaqInfo): The DAQ configuration of the received data.
+        data_columns (dict): A dictionary mapping data columns to DAQ channels.
+        packet_num (int): The packet number of the last received data.
+        sync_status (bool): Indicates if master clock is synchronized
 
     Methods:
         recv_data(): Receives a numpy array along with its metadata.
@@ -138,11 +143,14 @@ class DaqSubscriber(object):
     def __init__(self, host: str = "127.0.0.1", port: int = 50001, init_daqinfo: bool = True, connect_timeout: float = 1.0):
         """Initialize the DaqSubscriber instance.
 
-        Sets up a ZeroMQ SUB socket to receive data from the specified host and port.
+        Sets up a ZeroMQ SUB socket to receive data from the specified host and port. 
+        Optionally attempts to retrieve the initial DAQ metadata upon connection.
 
         Parameters:
-            host: The IP address to connect to.
-            port: The port number to connect to.
+            host (str): The IP address to connect to (default: "127.0.0.1").
+            port (int): The port number to connect to (default: 50001).
+            init_daqinfo (bool): Whether to retrieve initial DAQ metadata from the publisher (default: True).
+            connect_timeout (float): The timeout duration (in seconds) for connection attempts (default: 1.0).
         """
         self.zmq_context = zmq.Context()
         self.sock = self.zmq_context.socket(zmq.SUB)
@@ -171,8 +179,9 @@ class DaqSubscriber(object):
         Waits for incoming data and metadata from the publisher, reconstructing the numpy array 
         from the received buffer.
 
-        Returns:
-            A tuple containing metadata (dict) and the received numpy array.
+        Parameters:
+            update_daqinfo (bool): Whether to update DAQ metadata upon receiving the packet (default: False).
+            flags (int): Optional ZeroMQ flags to pass for receiving data (default: 0).
 
         Examples:
             >>> data = subscriber.recv_data()

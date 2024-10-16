@@ -41,29 +41,36 @@ class AcqBufferPool(object):
     channels.
 
     Attributes:
-        channel: A dictionary mapping channel names to their respective `AcqBuffer` instances.
-        time: Buffer for storing timestamps.
-        actual_sidx: Index of the last sample added to the buffers.
-        _daq_info: Information about the DAQ system, including channel configurations.
-        _buffer_size: Number of samples in the buffer.
+        channel (dict): A dictionary mapping channel names to their respective `AcqBuffer` instances.
+        time (AcqBuffer): Buffer for storing timestamps.
+        actual_sidx (int): Index of the last sample added to the buffers.
+        _daq_info (DaqInfo): Information about the DAQ system, including channel configurations.
+        _data_columns (dict): Maps analog input pins to data column indices.
+        _buffer_size (int): Number of samples in each channel's buffer.
+        _last_timestamp_us (int): Stores the last timestamp in microseconds.
+        _time_batch_array (np.array): Array used to generate timestamp batches.
 
     Methods:
         put_data(data: np.array): Adds data to the channel buffers.
         add_timestamp(timestamp_us: int, num_samples: int): Adds timestamps to the time buffer.
         put_data_with_timestamp(data: np.array, timestamp_us: int): Adds channel data and timestamps to the buffers.
+        put_data_with_samplerate(data: np.array, samplerate: float): Adds data and updates timestamps using sample rate.
 
     Examples:
-        >>> buffer_pool = AcqBufferPool(daq_info=my_daq_info, size=50000)
+        >>> buffer_pool = AcqBufferPool(daq_info=my_daq_info, data_columns=my_data_columns, size=50000)
         >>> buffer_pool.put_data_with_timestamp(data_array, timestamp_us=987654321)
     """
+    
     def __init__(self, daq_info: DaqInfo, data_columns: dict, size: int = 100000,  start_timestamp_us: int = 0):
-        """Initialize the AcqBufferPool instance for buffering multi-channel data.
+        """
+        Initialize the AcqBufferPool instance for buffering multi-channel data.
 
         Sets up the buffers for each channel as defined in the provided `DaqInfo` object and 
         prepares the time buffer for storing timestamps.
 
         Parameters:
             daq_info: An instance of `DaqInfo` to configure the channel buffers.
+            data_columns: Dictionary mapping AI pins to data column indices.
             size: Number of samples in each buffer.
             start_timestamp_us: Starting timestamp offset in microseconds.
         """
@@ -162,6 +169,18 @@ class AcqBufferPool(object):
         self.put_data(data)
         timestamp_us = self._last_timestamp_us + data.shape[0]*1e6/samplerate
         self.add_timestamp(timestamp_us, data.shape[0])
+
+    def reset(self):
+        """Reset all underlying buffer, clearing all stored data.
+
+        Resets the buffer to its initial state by zeroing out all data and resetting 
+        the write index and sample count.
+        """
+        for channel_name, channel_buf in self.channel.items():
+            channel_buf.reset()
+        self.time.reset()
+        self._last_timestamp_us = 0
+        self._time_batch_array = np.zeros(1)
 
 
 class AcqBuffer(object):

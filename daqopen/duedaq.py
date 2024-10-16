@@ -96,24 +96,24 @@ class DueSerialSim(object):
     software testing without the need for actual hardware.
 
     Attributes:
-        MCLK: MCU Clock Frequency
-        CONV_CYCLES_PER_SAMPLE: Clock Cycles per conversation
-        MAX_BUFFER_SIZE: Maximum DMA Buffer Size for ADC cyclic buffer in cumulated samples
-        MIN_BUFFER_SIZE: Minimum DMA Buffer Size for ADC cyclic buffer in cumulated samples
-        MAX_BUFFER_DURATION: Maximum equivalent time duration of buffer for responisveness
+        MCLK: MCU Clock Frequency.
+        CONV_CYCLES_PER_SAMPLE: Clock Cycles per conversion.
+        MAX_BUFFER_SIZE: Maximum DMA buffer size for ADC cyclic buffer in cumulative samples.
+        MIN_BUFFER_SIZE: Minimum DMA buffer size for ADC cyclic buffer in cumulative samples.
         NUM_BYTES_PER_SAMPLE: Number of bytes per data sample.
-        NUM_BYTES_PKG_CNT: Number of bytes of package counter.
+        NUM_BYTES_PKG_CNT: Number of bytes in the package counter.
         START_PATTERN: Byte pattern marking the start of a data frame.
         FRAME_NUM_DT: Data type for frame number, with little-endian byte order.
         FRAME_NUM_MAX: Maximum value for the frame number.
         ADC_RANGE: Range of the ADC values for normalization.
         CHANNEL_MAPPING: Mapping of channel names to their corresponding physical pins.
+        CHANNEL_ORDER: Order of the channels in data package.
 
     Parameters:
-        realtime: Enable or disable the realtime simulation.
+        realtime: Enable or disable the real-time simulation.
 
     Methods:
-        write: Simulates writing commands to the DAQ system (e.g., "START", "STOP").
+        write: Simulates writing commands to the DAQ system (e.g., "START", "STOP", "SETMODE").
         read: Reads a specified length of data from the simulated DAQ system.
         readinto: Reads data directly into the provided buffer.
         reset_input_buffer: Resets the internal read buffer.
@@ -139,19 +139,29 @@ class DueSerialSim(object):
     def __init__(self, realtime: bool = True):
         """Initialize the DueSerialSim instance for simulating data acquisition.
 
-        This constructor sets up the simulation environment for the Arduino Due DAQ system. 
+        This constructor sets up the simulation environment for the Arduino Due DAQ system.
         It initializes the internal state, prepares the simulated data signals, and sets up the 
-        delay between data packet generations.
+        delay between data packet generations if `realtime` is enabled.
 
         Parameters:
-            realtime: Enable or disable the realtime simulation. If True, realtime is enabled and the
-                      timing should be similar to the real board. Otherwise, it works as fast as possible.
+            realtime: Enable or disable the realtime simulation. If True, timing will simulate the 
+                    behavior of the real board. Otherwise, the simulation runs as fast as possible.
 
         Attributes:
             response_data: Placeholder for response data, initialized as an empty byte string.
             _frame_number: Counter to keep track of the frame number.
-            _actual_statr: Current state of the simulator, either "started" or "stopped".
+            _actual_state: Current state of the simulator, either "started" or "stopped".
             _read_buffer: Buffer to store generated frames for reading.
+            _is_differential: Boolean flag indicating whether differential mode is enabled.
+            _gain_value: Gain value used in signal simulation, range 0-3.
+            _offset_enabled: Boolean flag indicating whether offset is enabled in the ADC.
+            _adc_prescal: ADC prescaler value, affecting the sampling rate.
+            _adc_cher: ADC channel enable register, storing active channel bits.
+            _channels: List of active ADC channels based on `_adc_cher`.
+            _buffer_size: Size of the buffer for data samples.
+            _samplerate: Calculated sample rate for the simulation.
+            _samples_per_block_channel: Number of samples per block per channel.
+            _signal_buffer: Buffer storing the simulated signal for all active channels.
         """
         self._realtime = realtime
         self.response_data = b""
@@ -170,6 +180,17 @@ class DueSerialSim(object):
         self._samples_per_block_channel = self._buffer_size
 
     def _cher_to_channels(self, cher: int) -> list:
+        """Convert the ADC channel enable register (cher) to a list of active channels.
+
+        This helper function checks which bits in the `cher` register are set and maps 
+        them to the corresponding channel names based on the `CHANNEL_MAPPING` attribute.
+
+        Parameters:
+            cher: Integer value representing the ADC channel enable register.
+
+        Returns:
+            list: A list of channel names corresponding to the bits set in the `cher` register.
+        """
         channels = []
         for ch, bit_pos in self.CHANNEL_MAPPING.items():
             if cher & (1 << bit_pos):
@@ -177,6 +198,20 @@ class DueSerialSim(object):
         return channels
 
     def _setup_fake_adc(self):
+        """Set up the fake ADC for the simulation.
+
+        This method configures the simulation's internal ADC parameters, including sample rate 
+        calculation and buffer size. It generates a sinusoidal signal for all active channels 
+        with attenuation applied to subsequent channels.
+
+        The generated signal is stored in the `_signal_buffer`, where each column represents 
+        a different ADC channel and each row a sample.
+
+        Notes:
+            - The sample rate is calculated based on the MCU clock, ADC prescaler, conversion cycles, 
+            and the number of active channels.
+            - A sinusoidal signal is generated, with each additional channel being attenuated.
+        """
         self._samplerate = int(self.MCLK/((1+self._adc_prescal)*2*self.CONV_CYCLES_PER_SAMPLE*len(self._channels)))
         self._samples_per_block_channel = self._buffer_size // len(self._channels)
         self._signal_buffer = np.zeros((self._samples_per_block_channel, len(self._channels)), dtype="int16")
@@ -188,6 +223,19 @@ class DueSerialSim(object):
             self._signal_buffer[:,i] = main_signal/(1.0+i) # attenuate following channels data        
 
     def _generate_frame(self):
+        """Generate a simulated data frame and store it in the internal read buffer.
+
+        This method creates a data frame containing the `START_PATTERN`, the current frame number, 
+        and the sampled data from the `_signal_buffer`. If the `realtime` flag is enabled, 
+        the method introduces a delay to simulate real-time data acquisition.
+
+        The frame consists of:
+            - START_PATTERN: Marks the beginning of a data frame.
+            - Frame number: 4-byte little-endian unsigned integer.
+            - Signal data: Simulated ADC samples for all active channels.
+
+        After the frame is generated, it is stored in the `_read_buffer` for future reading.
+        """
         if self._realtime:
             time.sleep(self._samples_per_block_channel/self._samplerate)
         self._frame_number += 1
@@ -196,10 +244,19 @@ class DueSerialSim(object):
         self._read_buffer = frame
 
     def write(self, data: bytes):
-        """ Fake serial write endpoint. Receive commands and act
+        """Simulate writing commands to the DAQ system and handle the setup accordingly.
 
-        Arguments:
-            data: data to be written by client
+        This method processes various commands sent to the DAQ system and adjusts the 
+        internal state of the simulator based on the command.
+
+        Parameters:
+            data: A byte string containing the command to be processed.
+        
+        Actions:
+            - The appropriate internal attributes (e.g., `_is_differential`, `_gain_value`, `_adc_prescal`) 
+            are updated based on the command.
+            - The method recalculates ADC parameters and regenerates the fake ADC configuration after 
+            any change in settings by calling `_setup_fake_adc`.
         """
         if data == b"START\n":
             self._actual_state = "started"
@@ -240,7 +297,20 @@ class DueSerialSim(object):
             pass
         self._setup_fake_adc()
 
-    def read(self, length: int = 0):
+    def read(self, length: int = 0) -> bytes:
+        """Simulate reading data from the DAQ system.
+
+        This method retrieves a specified amount of data from the internal read buffer. 
+        If the buffer is empty and the simulation is in the "started" state, a new frame is generated.
+
+        Parameters:
+            length: The number of bytes to read from the buffer. If there is not enough data, 
+                    a new frame is generated if the DAQ is running.
+
+        Returns:
+            bytes: A byte string containing the requested data from the buffer. If the buffer 
+                contains less data than requested, it returns whatever is available.
+        """
         if len(self._read_buffer) < length and self._actual_state == "started":
             self._generate_frame()
         elif len(self._read_buffer) < length:
@@ -252,6 +322,19 @@ class DueSerialSim(object):
         return data_to_send
 
     def readinto(self, buffer: bytearray = 0):
+        """Simulate reading data into an existing buffer.
+
+        This method fills the provided buffer with data from the internal read buffer. If the simulation 
+        is in the "started" state, a new data frame is generated. If data already exists in the buffer 
+        when a new frame is generated, a warning is logged.
+
+        Parameters:
+            buffer: A bytearray that will be filled with the simulated data.
+        
+        Actions:
+            - The internal read buffer is filled with the generated frame.
+            - The provided buffer is then populated with this data.
+        """
         if self._actual_state == "started":
             if self._read_buffer:
                 logger.warning(f"Warning - Buffer not empty before new fillup: {len(self._read_buffer)}")
@@ -260,6 +343,13 @@ class DueSerialSim(object):
             self._read_buffer = b""
     
     def reset_input_buffer(self):
+        """Reset the internal read buffer of the simulator.
+
+        This method clears the current content of the `_read_buffer`, ensuring that no 
+        previously generated frames remain in the buffer.
+
+        It can be used to reset the state when switching between different commands or tests.
+        """
         self._read_buffer = b""
 
 class DueDaqGain(Enum):
@@ -273,12 +363,12 @@ class DueDaqGain(Enum):
         DIFF_1X: Differential Mode Gain = 1x
         DIFF_2X: Differential Mode Gain = 2x
     """
-    SGL_1X = 0x01
-    SGL_2X = 0x02
-    SGL_4X = 0x03
-    DIFF_05X = 0x00
-    DIFF_1X = 0x01
-    DIFF_2X = 0x02
+    SGL_1X: int = 0x01
+    SGL_2X: int = 0x02
+    SGL_4X: int = 0x03
+    DIFF_05X: int = 0x00
+    DIFF_1X: int = 0x01
+    DIFF_2X: int = 0x02
 
 class DueDaq(object):
     """
@@ -290,57 +380,49 @@ class DueDaq(object):
     it supports simulated data acquisition for testing purposes.
 
     Attributes:
-        MCLK: MCU Clock Frequency
-        CONV_CYCLES_PER_SAMPLE: Clock Cycles per conversation
-        MAX_BUFFER_SIZE: Maximum DMA Buffer Size for ADC cyclic buffer in cumulated samples
-        MIN_BUFFER_SIZE: Minimum DMA Buffer Size for ADC cyclic buffer in cumulated samples
-        MAX_BUFFER_DURATION: Maximum equivalent time duration of buffer for responisveness
+        MCLK: MCU Clock Frequency.
+        CONV_CYCLES_PER_SAMPLE: Clock cycles per ADC conversion.
+        MAX_BUFFER_SIZE: Maximum DMA buffer size for ADC cyclic buffer in cumulative samples.
+        MIN_BUFFER_SIZE: Minimum DMA buffer size for ADC cyclic buffer in cumulative samples.
+        MAX_BUFFER_DURATION: Maximum time duration of the buffer for responsiveness.
         NUM_BYTES_PER_SAMPLE: Number of bytes per data sample.
-        NUM_BYTES_PKG_CNT: Number of bytes of package counter.
+        NUM_BYTES_PKG_CNT: Number of bytes for the package counter.
         START_PATTERN: Byte pattern marking the start of a data frame.
         FRAME_NUM_DT: Data type for frame number, with little-endian byte order.
         FRAME_NUM_MAX: Maximum value for the frame number.
         ADC_RANGE: Range of the ADC values for normalization.
         CHANNEL_MAPPING: Mapping of channel names to their corresponding physical pins.
+        CHANNEL_ORDER: Order of the channels in the data package.
 
     Parameters:
-        channels: List if channels to be acquired
+        channels: List of channels to be acquired.
         reset_pin: GPIO pin number for hardware reset (default: None).
         serial_port_name: Name of the serial port for communication. Use `"SIM"` for simulation mode.
-        samplerate: Wanted samplerate of acquisition (per channel). Can't be guranteed.
-        differential: Enable or disable the differential mode of the analog input
-        gain: Set the input amplification of the integrated stage
-        offset_enabled: Enable or disable, if the offset should be removed before amplification (only for single ended)
-        extend_to_int16: If true, expand the data to 16-Bit range and perform crosstalk compensation (experimental)
-        sim_packet_generation_delay: Delay in seconds for packet generation in simulation mode (default: 0.04).
+        samplerate: Desired sampling rate for acquisition per channel (may not be guaranteed).
+        differential: Enable or disable differential mode for the analog input.
+        gain: Set the input amplification of the integrated stage.
+        offset_enabled: Enable or disable offset removal before amplification (only for single-ended).
+        extend_to_int16: Expand the data to 16-bit range and perform crosstalk compensation (experimental).
+        realtime_sim: Enable or disable realtime mode during simulation
 
     Methods:
         start_acquisition(): Starts the data acquisition process.
         stop_acquisition(): Stops the data acquisition process.
         hard_reset(): Performs a hardware reset of the DAQ system using the specified reset pin.
         read_data(): Reads and processes a block of data from the DAQ system.
-        
+
     Examples:
         >>> from daqopen.duedaq import DueDaq
-        # Initialize with the simulation mode
         >>> my_daq = DueDaq(serial_port_name="SIM")
-        # Start data acquisition
         >>> my_daq.start_acquisition()
-        # Read and print data
         >>> data = my_daq.read_data()
         >>> print(data)
-        # Stop data acquisition
         >>> my_daq.stop_acquisition()
 
-    Notes:
-        - To use with actual hardware, provide the correct serial port name and ensure the Arduino Due is connected.
-        - In simulation mode (`serial_port_name="SIM"`), data acquisition is simulated using the `DueSerialSim` class.
-        - If using the `reset_pin` feature on a Raspberry Pi, ensure the `RPi.GPIO` library is installed.
-
     Raises:
-        DeviceNotFoundException: if the specified DAQ device is not found.
-        DAQErrorException: for general errors during data acquisition, such as frame number mismatches.
-        AcqNotRunningException: if attempting to read data without an active acquisition process.
+        DeviceNotFoundException: If the DAQ device is not found.
+        DAQErrorException: For errors during data acquisition, such as frame number mismatches.
+        AcqNotRunningException: If trying to read data without an active acquisition process.
     """
     MCLK: int = 84_000_000
     CONV_CYCLES_PER_SAMPLE: int = 21
@@ -367,25 +449,29 @@ class DueDaq(object):
                  gain: str | DueDaqGain = DueDaqGain.SGL_1X,
                  offset_enabled: bool = False, 
                  extend_to_int16: bool = False,
-                 sim_packet_generation_delay: float = 0.04):
+                 realtime_sim: bool = True):
         """
-        Initialize the DueDaq instance.
+    Initialize the DueDaq instance for data acquisition.
 
-        Parameters:
-            channels: List if channels to be acquired
-            reset_pin: GPIO pin number for hardware reset (default: None).
-            serial_port_name: Name of the serial port for communication. Use `"SIM"` for simulation mode.
-            samplerate: Wanted samplerate of acquisition (per channel). Can't be guranteed.
-            differential: When True, differential input mode, otherwise single-ended
-            gain: Gain of ADC input amplifer
-            offset_enabled: Weather offset will be removed before amplification or not
-            extend_to_int16: If true, expand the data to 16-Bit range and perform crosstalk compensation (experimental)
-            sim_packet_generation_delay: Delay in seconds for packet generation in simulation mode (default: 0.04).
+    Sets up the necessary configurations for either real or simulated data acquisition. It calculates 
+    the ADC prescaler, sets up channels, and initializes the serial communication with either the 
+    real Arduino Due hardware or the `DueSerialSim` simulator.
 
-        Notes:
-            - If `serial_port_name` is `"SIM"`, the `DueSerialSim` class will be used for simulated data acquisition.
-            - If using `reset_pin` for hardware reset on a Raspberry Pi, ensure the `RPi.GPIO` library is installed.
-        """
+    Parameters:
+        channels: List of channels to be acquired.
+        reset_pin: GPIO pin number for hardware reset (default: None).
+        serial_port_name: Name of the serial port for communication. Use `"SIM"` for simulation mode.
+        samplerate: Desired sampling rate for acquisition per channel (cannot be guaranteed).
+        differential: Enable or disable differential mode for the analog input.
+        gain: Gain of ADC input amplifier (e.g., single-ended 1x, 2x, etc.).
+        offset_enabled: Whether to remove offset before amplification (single-ended mode only).
+        extend_to_int16: Expand data to 16-bit range and perform crosstalk compensation (experimental).
+        realtime_sim: Enable or disable realtime mode during simulation
+
+    Notes:
+        - If `serial_port_name` is `"SIM"`, the `DueSerialSim` class will be used for simulated data acquisition.
+        - For hardware reset on a Raspberry Pi using `reset_pin`, ensure that the `RPi.GPIO` library is installed.
+    """
         if reset_pin is not None:
             try:
                 import RPi.GPIO as GPIO
@@ -398,7 +484,7 @@ class DueDaq(object):
 
         self._adc_channels = channels
         self._wanted_samplerate = samplerate
-        self._sim_packet_generation_delay = sim_packet_generation_delay
+        self._realtime_sim = realtime_sim
         self._serial_port_name = serial_port_name
         self._differential = differential
         if not isinstance(gain, DueDaqGain):
@@ -416,14 +502,16 @@ class DueDaq(object):
         self._init_board()
     
     def _init_board(self):
-        """Initialize the board by setting up the serial communication.
+        """Initialize the DAQ board and set up serial communication.
 
-        Depending on whether the simulation mode is active, this method will either create a 
-        `DueSerialSim` instance for simulated data acquisition or configure a real serial 
-        port connection for hardware communication.
+        Depending on the provided `serial_port_name`, this method either initializes a simulation mode 
+        using `DueSerialSim` or establishes a connection with the actual Arduino Due hardware via serial.
+
+        It configures the samplerate, buffer size, and prescaler for the ADC, and sends initialization 
+        commands to the board, including channel settings, input mode, and gain.
 
         Raises:
-            DeviceNotFoundException: If the Arduino Due device is not found on any serial port.
+            DeviceNotFoundException: If no Arduino Due device is found.
         """
         # Calculate prescaler
         self._adc_prescal = int(self.MCLK/(self._wanted_samplerate*len(self._adc_channels)*self.CONV_CYCLES_PER_SAMPLE*2)-1)
@@ -444,7 +532,7 @@ class DueDaq(object):
         else:
             serial_port_name = self._serial_port_name
         if self._serial_port_name == "SIM":
-            self._serial_port = DueSerialSim(self._sim_packet_generation_delay)
+            self._serial_port = DueSerialSim(self._realtime_sim)
         else:
             self._serial_port = serial.Serial(serial_port_name, timeout=1)
         self._read_buffer = bytearray(self._buffer_blocksize)
@@ -496,9 +584,13 @@ class DueDaq(object):
     def start_acquisition(self):
         """Start the data acquisition process.
 
-        Sends the "START" command to the DAQ system to begin data acquisition. It resets the 
-        input buffer and waits for the first frame to ensure synchronization before switching 
-        to the "running" state.
+        Sends the "START" command to the DAQ system to begin data acquisition. It waits for the 
+        start of a data frame to synchronize the system, then sets the acquisition state to "running".
+
+        Actions:
+            - Resets the input buffer.
+            - Waits for the first data frame to ensure proper synchronization.
+            - Changes the acquisition state to "running".
         """
         self._serial_port.write(b"START\n")
         time.sleep(0.1)
@@ -522,11 +614,14 @@ class DueDaq(object):
         logger.info("DueDaq ACQ Stopped")
 
     def hard_reset(self):
-        """Perform a hardware reset of the DAQ system using the specified reset pin.
+        """Perform a hardware reset of the DAQ system.
 
-        This method uses the GPIO pin (if specified and correctly configured) to reset the 
-        Arduino Due hardware. This is only applicable when running on a Raspberry Pi with 
-        the `RPi.GPIO` library installed.
+        Uses the specified `reset_pin` (if configured) to reset the Arduino Due hardware. This is only 
+        applicable when running on a Raspberry Pi with the `RPi.GPIO` library installed.
+        
+        Actions:
+            - Drives the reset pin low for 1 second, then high again to reset the hardware.
+            - Reinitializes the DAQ board after the reset.
         """
         if self._reset_pin is None:
             return None
@@ -537,10 +632,10 @@ class DueDaq(object):
         self._init_board()
 
     def _wait_for_frame_start(self):
-        """Wait for the start of a data frame.
+        """Wait for the start of a data frame from the DAQ system.
 
-        Reads incoming data until the start pattern (`START_PATTERN`) is detected, ensuring 
-        synchronization with the data stream. This helps avoid corrupted or incomplete data frames.
+        Reads incoming data and searches for the `START_PATTERN` to detect the beginning of a valid 
+        data frame. This ensures synchronization with the data stream and prevents reading corrupt data.
         """
         prev_byte = bytes.fromhex('00')
         for i in range(10):
@@ -558,12 +653,13 @@ class DueDaq(object):
     def _read_frame_raw(self):
         """Read a raw data frame from the DAQ system.
 
-        Reads a single frame of data into the internal buffer. It verifies the integrity of the 
-        frame by checking for the start pattern and ensuring the frame number is sequential.
+        Reads one frame of data from the DAQ system and verifies its integrity by checking the frame 
+        number and the start pattern. If the frame number does not increment as expected, an error 
+        is raised.
 
         Raises:
-            AcqNotRunningException: If the acquisition is not currently running.
-            DAQErrorException: If there is a mismatch in the expected frame number.
+            AcqNotRunningException: If acquisition is not currently running.
+            DAQErrorException: If there is a mismatch in the frame number.
         """
         if self._acq_state != "running":
             raise AcqNotRunningException("Can't read frame")

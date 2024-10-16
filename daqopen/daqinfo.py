@@ -6,20 +6,23 @@
 This module provides classes to represent and manipulate the configuration information 
 for data acquisition systems. The primary classes are `DaqInfo`, which encapsulates 
 the DAQ system's configuration, and `InputInfo`, which holds detailed information about 
-each input channel.
+each input channel, along with `BoardInfo` to define board-level properties.
 
 ## Usage
 
 The `DaqInfo` class serves as the main interface for managing DAQ configuration, including 
 loading from and saving to different formats such as dictionaries and binary data. 
 The `InputInfo` class defines the attributes of individual input channels, such as gain, offset, 
-delay, and unit.
+delay, and unit, while `BoardInfo` captures system-level settings such as sample rate and board type.
 
 Examples:
     Creating a `DaqInfo` instance from a dictionary:
 
     >>> info_dict = {
-    >>>     "samplerate": 48000,
+    >>>     "board": {
+    >>>         "samplerate": 48000,
+    >>>         "type": "default"
+    >>>     },
     >>>     "channel": {
     >>>         "U1": {"gain": 1.0, "offset": 1.0, "delay": 1, "unit": "V", "ai_pin": "A0"},
     >>>         "U2": {"gain": 2.0, "offset": 2.0, "delay": 2, "unit": "V", "ai_pin": "A1"}
@@ -30,6 +33,7 @@ Examples:
 Classes:
     DaqInfo: Represents the configuration of the DAQ system.
     InputInfo: Defines the properties of an input channel.
+    BoardInfo: Defines the properties of the DAQ board.
 
 """
 
@@ -46,11 +50,11 @@ class InputInfo:
     the settings for each channel in a DAQ system.
 
     Attributes:
-        gain: The gain applied to the input channel.
-        offset: The offset applied to the input channel.
-        delay: The delay in sample periods for this channel.
-        unit: The unit of the measurement.
-        ai_pin: The Due pin name e.g. "A0".
+        gain (float): The gain applied to the input channel.
+        offset (float): The offset applied to the input channel.
+        delay (int): The delay in sample periods for this channel.
+        unit (str): The unit of the measurement.
+        ai_pin (str): The analog input pin name (e.g., "A0").
 
     Examples:
         >>> input_info = InputInfo(gain=2.0, offset=1.0, delay=5, unit="V", ai_pin="A0")
@@ -63,7 +67,21 @@ class InputInfo:
 
 @dataclass
 class BoardInfo:
-    """ Represents the configuration of board properties
+    """Represents the configuration of the DAQ board.
+
+    `BoardInfo` stores board-level settings, such as the sample rate, board type, and whether 
+    the configuration is differential or single-ended. It also allows configuration of the 
+    gain and offset mode settings.
+
+    Attributes:
+        type (str): The type of the board.
+        samplerate (float): The sampling rate in Hz.
+        differential (bool): Specifies if the configuration is differential (default: False).
+        gain (str): Gain setting for the board (default: "SGL_1X").
+        offset_enabled (bool): Specifies if offset mode is enabled (default: False).
+
+    Examples:
+        >>> board_info = BoardInfo(type="duedaq", samplerate=50000)
     """
     type: str
     samplerate: float
@@ -79,22 +97,23 @@ class DaqInfo(object):
     (e.g., dictionary, binary data) and for applying sensor adjustments to channels.
 
     Attributes:
-        samplerate: The sampling rate of the DAQ system in Hz.
-        channel: A dictionary of `InputInfo` objects, keyed by channel name.
-        ai_pin_name: Maps channel names to their analog-to-digital (AD) indices.
-        channel_name: Maps AD indices to channel names.
+        board (BoardInfo): The board-level information of the DAQ system.
+        channel (dict): A dictionary of `InputInfo` objects, keyed by channel name.
+        ai_pin_name (dict): Maps channel names to their analog-to-digital (AD) indices.
+        channel_name (dict): Maps AD indices to channel names.
 
     Methods:
         from_dict(data): Class method to create a `DaqInfo` instance from a dictionary.
-        from_binary(data): Class method to create a `DaqInfo` instance from binary data.
+        get_default(): Class method to create a default `DaqInfo` instance.
         to_dict(): Converts the `DaqInfo` instance into a dictionary format.
         apply_sensor_to_channel(ch_name, sensor_info): Applies sensor configuration to a specific channel.
-        to_binary(): Converts the `DaqInfo` instance into a binary format.
+        __str__(): Returns a string representation of the `DaqInfo` instance.
 
     Examples:
         >>> info_dict = {
         >>>     "board": {
-        >>>         "samplerate": 48000
+        >>>         "samplerate": 48000,
+        >>>         "type": "default"
         >>>     },
         >>>     "channel": {
         >>>         "U1": {"gain": 1.0, "offset": 1.0, "delay": 1, "unit": "V", "ai_pin": "A0"},
@@ -104,14 +123,14 @@ class DaqInfo(object):
         >>> myDaqInfo = DaqInfo.from_dict(info_dict)
     """
     def __init__(self, board_info: BoardInfo, channel_info: Dict[str, InputInfo]):
-        """Initialize the DaqInfo instance with the specified sampling rate and channel information.
+        """Initialize the DaqInfo instance with the specified board and channel information.
 
         Sets up the DAQ configuration, mapping channel names to their analog-to-digital (AD) indices 
         and vice versa. Stores the input channel configurations provided in `channel_info`.
 
         Parameters:
-            board_info: The board info as instance of BoardInfo.
-            channel_info: A dictionary mapping channel names to `InputInfo` instances.
+            board_info (BoardInfo): The board information as an instance of `BoardInfo`.
+            channel_info (dict): A dictionary mapping channel names to `InputInfo` instances.
 
         Examples:
             >>> channel_info = {
@@ -134,29 +153,33 @@ class DaqInfo(object):
         self.channel = channel_info
 
     @classmethod
-    def from_dict(cls, data: dict):
+    def from_dict(cls, data: dict) -> DaqInfo: # type: ignore
         """Create a DaqInfo instance from a dictionary.
 
         Converts a dictionary containing DAQ configuration information into a `DaqInfo` instance. 
-        The dictionary should include a `samplerate` key and a `channel` key that maps channel names 
-        to their configurations.
+        The dictionary should include a `board` key with board information, and a `channel` key 
+        that maps channel names to their configurations.
 
         Parameters:
-            data: A dictionary containing DAQ configuration data.
+            data (dict): A dictionary containing DAQ configuration data.
+
+        Returns:
+            DaqInfo: A new instance of `DaqInfo` populated with the provided data.
 
         Notes:
             Expected format:
                 {
-                    "board" : {
-                        "samplerate": float
-                    }
+                    "board": {
+                        "samplerate": float,
+                        "type": str
+                    },
                     "channel": {
                         "ChannelName": {
                             "gain": float,
                             "offset": float,
                             "delay": int,
                             "unit": str,
-                            "ai_pin": int
+                            "ai_pin": str
                         },
                         ...
                     }
@@ -176,9 +199,13 @@ class DaqInfo(object):
         return cls(board_info=board_info, channel_info=channel_info)
 
     @classmethod
-    def get_default(cls):
+    def get_default(cls) -> DaqInfo: # type: ignore
         """Create a default DaqInfo Object
 
+        Returns a `DaqInfo` instance with default board and channel configurations.
+
+        Returns:
+            DaqInfo: A new `DaqInfo` instance with default values.
         """
         board_info = BoardInfo(type="default", samplerate=0)
         channel_info = {}
@@ -231,9 +258,9 @@ class DaqInfo(object):
         Examples:
             >>> daq_info = DaqInfo(...)
             >>> print(str(daq_info))
-            DaqInfo(samplerate=48000)
+            DaqInfo(type=duedaq,samplerate=48000)
         """
-        return f"{self.__class__.__name__}(samplerate={self.board.samplerate})"    
+        return f"{self.__class__.__name__}(type={self.board.type},samplerate={self.board.samplerate})"    
 
 
 if __name__ == "__main__":
