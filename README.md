@@ -26,7 +26,7 @@ This library should be used if:
 Installation from pypi:
 
 ```bash
-pip install daqopen
+pip install daqopen-lib
 ```
 
 Install latest directly from Github:
@@ -63,7 +63,7 @@ plt.plot(data)
 plt.show()
 ```
 
-![image-20241010124001678](ressources/sim-first-acq.png)
+![image-20241010124001678](resources/sim-first-acq.png)
 
 
 
@@ -108,7 +108,7 @@ plt.show()
 
 You should see something like this:
 
-![my-first-acq-1](ressources/my-first-acq-1.png)
+![my-first-acq-1](resources/my-first-acq-1.png)
 
 Congratulations!
 
