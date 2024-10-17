@@ -153,7 +153,7 @@ class DaqInfo(object):
         self.channel = channel_info
 
     @classmethod
-    def from_dict(cls, data: dict) -> DaqInfo: # type: ignore
+    def from_dict(cls, data: dict):
         """Create a DaqInfo instance from a dictionary.
 
         Converts a dictionary containing DAQ configuration information into a `DaqInfo` instance. 
@@ -199,7 +199,7 @@ class DaqInfo(object):
         return cls(board_info=board_info, channel_info=channel_info)
 
     @classmethod
-    def get_default(cls) -> DaqInfo: # type: ignore
+    def get_default(cls):
         """Create a default DaqInfo Object
 
         Returns a `DaqInfo` instance with default board and channel configurations.
