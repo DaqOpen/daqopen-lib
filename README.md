@@ -2,9 +2,11 @@
 
 This library can be used for various data acquisition tasks to proper handle streaming ADC data for building data acquisition applications.
 
+**Documentation** incl. tutorials can be found here: [docs.daqopen.com](https://docs.daqopen.com)
+
 Initially, it is build around the Arduino Due, which has a high-speed ADC with good accuracy and a data transfer via USB 2.0. Most of the examples and driver uses this model together with the firmware which can be found in the firmware folder.
 
-**Documentation** incl. tutorials can be found here: [docs.daqopen.com](https://docs.daqopen.com)
+![Schema-Bild](resources/scheme-overview.png)
 
 ## Features
 
@@ -12,8 +14,6 @@ Initially, it is build around the Arduino Due, which has a high-speed ADC with g
 - **Circular Channel Buffer:** A class representing a circular buffer for holding needed amount of data for viewing, calculating and storing.
 - **DAQ-Info Class:** Can be used to exchange informations regarding the interpretation of the data packages. It holds adjustment values and info about the acquisition rate.
 - **ZMQ-Support:** Transfer the acquired data in realtime via zmq to other applications or hosts
-
-
 
 ## Intended Use
 
@@ -113,3 +113,21 @@ You should see something like this:
 Congratulations!
 
 For more Examples see [docs.daqopen.com](https://docs.daqopen.com)
+
+## Roadmap
+
+A quick and dirty roadmap to show what is planned for the future:
+
+- [ ] More practical examples
+- [ ] Raspberry Pi Pico as DAQ device
+- [ ] ...
+
+## Contributing
+
+I welcome contributions to **DaqOpen**! If you'd like to contribute, please fork the repository, create a new branch, and submit a pull request.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+![Logo_200px](resources/Logo_200px.png)
