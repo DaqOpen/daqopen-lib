@@ -80,6 +80,7 @@ class BoardInfo:
         gain (str): Gain setting for the board (default: "SGL_1X").
         offset_enabled (bool): Specifies if offset mode is enabled (default: False).
         adc_range (list): Range of the ADC [min, max] to calculate the physical range (default: [0, 4095])
+        adc_clock_gain (float): Adjustment factor for adc clock (default: 1.0)
 
     Examples:
         >>> board_info = BoardInfo(type="duedaq", samplerate=50000)
@@ -90,6 +91,7 @@ class BoardInfo:
     gain: str = "SGL_1X"
     offset_enabled: bool = False
     adc_range: tuple = (0, 4095)
+    adc_clock_gain: float = 1.0
 
 class DaqInfo(object):
     """Represents the configuration of the data acquisition (DAQ) system.
