@@ -8,7 +8,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 
 from daqopen.daqinfo import DaqInfo
-from daqopen.channelbuffer import AcqBuffer, AcqBufferPool
+from daqopen.channelbuffer import AcqBuffer, AcqBufferPool, DataChannelBuffer
 
 class TestChannelBuffer(unittest.TestCase):
     def test_acq_buffer_simple(self):
@@ -73,6 +73,92 @@ class TestChannelBuffer(unittest.TestCase):
         ts = my_acq_pool.time.read_data_by_index(0,10)
         # Check values
         self.assertIsNone(np.testing.assert_array_almost_equal(time_data, ts/1e6))
+
+class TestDataChannelBuffer(unittest.TestCase):
+    def setUp(self):
+        """
+        Set up test cases with a small buffer for testing.
+        """
+        self.buffer = DataChannelBuffer(name="TestBuffer", size=10, sample_dimension=1, agg_type="rms")
+
+    def test_put_data_single(self):
+        """
+        Test inserting a single data sample into the buffer.
+        """
+        self.buffer.put_data_single(1, 2.0)
+        self.assertEqual(self.buffer.sample_count, 1)
+        self.assertEqual(self.buffer.last_sample_value, 2.0)
+        self.assertEqual(self.buffer.last_sample_acq_sidx, 1)
+        self.assertTrue((self.buffer._data[0] == 2.0))
+
+    def test_circular_buffer_behavior(self):
+        """
+        Test circular buffer overwriting when the buffer is full.
+        """
+        for i in range(15):  # Exceed buffer size
+            self.buffer.put_data_single(i, float(i))
+        self.assertEqual(self.buffer.sample_count, 15)
+        self.assertEqual(self.buffer.last_sample_value, 14.0)
+        self.assertEqual(self.buffer.last_sample_acq_sidx, 14)
+        self.assertTrue((self.buffer._data[0] == 10.0))  # First value after overwrite
+        self.assertTrue((self.buffer._data[-1] == 9.0))
+
+    def test_read_data_by_acq_sidx(self):
+        """
+        Test reading data by acquisition indices.
+        """
+        for i in range(5):
+            self.buffer.put_data_single(i, float(i * 10))
+        data, ts = self.buffer.read_data_by_acq_sidx(1, 4)
+        np.testing.assert_array_equal(data, [10.0, 20.0, 30.0])
+        np.testing.assert_array_equal(ts, [1, 2, 3])
+
+    def test_read_data_wraparound(self):
+        """
+        Test reading data when the circular buffer has wrapped around.
+        """
+        for i in range(15):  # Exceed buffer size
+            self.buffer.put_data_single(i, float(i))
+        data, ts = self.buffer.read_data_by_acq_sidx(12, 15)
+        np.testing.assert_array_equal(data, [12.0, 13.0, 14.0])
+        np.testing.assert_array_equal(ts, [12, 13, 14])
+
+    def test_read_agg_data_rms(self):
+        """
+        Test reading RMS aggregated data.
+        """
+        for i in range(5):
+            self.buffer.put_data_single(i, float(i))
+        result = self.buffer.read_agg_data_by_acq_sidx(1, 5)
+        expected_rms = np.sqrt(np.mean(np.square([1.0, 2.0, 3.0, 4.0])))
+        self.assertAlmostEqual(result, expected_rms)
+
+    def test_read_agg_data_max(self):
+        """
+        Test reading max aggregated data.
+        """
+        buffer = DataChannelBuffer(name="MaxBuffer", size=10, sample_dimension=1, agg_type="max")
+        for i in range(5):
+            buffer.put_data_single(i, float(i))
+        result = buffer.read_agg_data_by_acq_sidx(1, 5)
+        self.assertEqual(result, 4.0)
+
+    def test_read_agg_data_mean(self):
+        """
+        Test reading mean aggregated data.
+        """
+        buffer = DataChannelBuffer(name="MeanBuffer", size=10, sample_dimension=1, agg_type=None)
+        for i in range(5):
+            buffer.put_data_single(i, float(i))
+        result = buffer.read_agg_data_by_acq_sidx(1, 5)
+        self.assertEqual(result, 2.5)
+
+    def test_read_agg_data_empty(self):
+        """
+        Test reading aggregated data with no matching indices.
+        """
+        result = self.buffer.read_agg_data_by_acq_sidx(100, 200)
+        self.assertTrue(np.isnan(result))
 
 if __name__ == "__main__":
     unittest.main()
