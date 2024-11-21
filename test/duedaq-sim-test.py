@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from daqopen.duedaq import DueDaq
 
-class TestDueDaqSim(unittest.TestCase):
+class TestDueDaqSimBasic(unittest.TestCase):
 
     def setUp(self):
         """Set up the DueDaq instance using simulation mode before each test."""
@@ -42,9 +42,32 @@ class TestDueDaqSim(unittest.TestCase):
         self.daq.start_acquisition()  # Start acquisition
         data = self.daq.read_data()  # Read a block of data
         self.assertIsNotNone(data)  # Ensure data is not None
-
         self.daq.stop_acquisition()  # Stop acquisition
         self.assertEqual(self.daq._acq_state, "stopped")  # Ensure acquisition has stopped
+
+class TestDueDaqSimAdv(unittest.TestCase):
+    
+    def test_set_samplerate_single_channel(self):
+        my_daq = DueDaq(
+            channels=["A1"],
+            serial_port_name="SIM",  # Use simulation mode
+            samplerate=10000.0,  # Desired sample rate for testing
+            realtime_sim=False # Shorter delay for testing
+        )
+        self.assertEqual(my_daq.samplerate, 10000)
+        self.assertEqual(my_daq._adc_prescal, 199)
+
+    def test_set_samplerate_single_channel_low(self):
+        my_daq = DueDaq(
+            channels=["A1"],
+            serial_port_name="SIM",  # Use simulation mode
+            samplerate=1000.0,  # Desired sample rate for testing
+            realtime_sim=False # Shorter delay for testing
+        )
+        self.assertEqual(my_daq.samplerate, 7812.5)
+        self.assertEqual(my_daq._adc_prescal, 255)
+    
+       
 
 
 if __name__ == "__main__":

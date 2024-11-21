@@ -4,7 +4,7 @@
 
   Author: Michael Oberhofer
   Created on: 2017-05-01
-  Last Updated: 2023-11-14
+  Last Updated: 2024-11-16
 
   Hardware: Arduino Due (with SAM3X)
 
@@ -25,7 +25,7 @@
   - http://forum.arduino.cc/index.php?topic=137635.msg1136315#msg1136315
   - http://www.robgray.com/temp/Due-pinout.pdf
 
-  Version: 0.91
+  Version: 0.98
   Github: https://github.com/DaqOpen/daqopen-lib/firmware/due-daq
   
   */
@@ -33,11 +33,15 @@
 
 #define MAX_BUFFER_SIZE 20000  // Define the maximum size of the ADC buffers
 #define START_MARKER_VALUE 0xFFFF  // Start marker value to indicate data transmission start
+#define MAJOR_VERSION 0
+#define MINOR_VERSION 98
 
 #define RX_LED 72  // Define the pin for RX LED
 #define TX_LED 73  // Define the pin for TX LED
 
-uint8_t protocol_version = 0x02;  // Protocol version
+#include <DueFlashStorage.h>
+DueFlashStorage dueFlashStorage;
+
 String serial_input_buffer;  // Buffer to hold incoming serial data
 uint16_t adc_buffers[2][MAX_BUFFER_SIZE];  // Double buffer for ADC data storage
 uint16_t start_marker[1];  // Marker indicating the start of ADC data transmission
@@ -56,11 +60,41 @@ void configurePWM() {
   REG_PMC_PCER1 |= PMC_PCER1_PID36;                     // Enable PWM peripheral
   REG_PIOB_ABSR |= PIO_ABSR_P14;                        // Set PWM pin peripheral type A or B, in this case B for PB14
   REG_PIOB_PDR |= PIO_PDR_P14;                          // Set PWM pin to an output (disable PIO control on PB14)
+  REG_PIOC_ABSR |= PIO_ABSR_P7;                        // Set PWM pin peripheral type A or B, in this case B for PB14
+  REG_PIOC_PDR |= PIO_PDR_P7;                          // Set PWM pin to an output (disable PIO control on PB14)
   REG_PWM_CLK = PWM_CLK_PREA(0) | PWM_CLK_DIVA(1);      // Set the PWM clock rate to 84MHz (84MHz/1) 
   REG_PWM_CMR2 = PWM_CMR_CPRE_CLKA;                     // Enable single slope PWM and set the clock source as CLKA for Channel 2 (PB14 is PWM Channel 2)
   REG_PWM_CPRD2 = 8400;                                 // Set the PWM frequency 84MHz/10kHz = 8400 
   REG_PWM_CDTY2 = 4200;                                 // Set the PWM duty cycle 50% (8400/2=4200)
   REG_PWM_ENA = PWM_ENA_CHID2;                          // Enable the PWM channel 2                          // Enable the PWM channel     
+}
+
+
+/**
+ * Set the serial number of the device
+ */
+void setSerial(uint16_t serial) {
+  dueFlashStorage.write(0, (byte *) &serial, sizeof(serial));
+}
+
+/**
+ * Read the serial number of the device
+ */
+uint16_t getSerial() {
+  byte* b = dueFlashStorage.readAddress(0);
+  uint16_t serial;
+  memcpy(&serial, b, sizeof(serial));
+  return(serial);
+}
+
+/**
+ * Read the device id
+ */
+String getDeviceId() {
+  uint32_t serial = getSerial();
+  // "DueDaq,Protocol_Version,Serial_Number"
+  String device_id_str = "DueDaq," + String(MAJOR_VERSION) + "." + String(MINOR_VERSION) + "," + String(serial) + "\n";
+  return(device_id_str);
 }
 
 /**
@@ -182,7 +216,13 @@ void setup(){
   digitalWrite(RX_LED, 1);  // Turn off RX LED
   pinMode(TX_LED, OUTPUT);  // Set TX LED pin as output
   digitalWrite(TX_LED, 1);  // Turn off TX LED
-  
+
+  #ifdef EXTERNAL_SUPPLY
+  PIOB->PIO_PER |= 1<<10;      // Never do this once Serial.begin() is called,
+  PIOB->PIO_OER |= 1<<10;      // it will disconnect the programming USB port from the PC.
+  PIOB->PIO_SODR |= 0<<10;     // UOTGVBOF HIGH  
+  #endif
+
   SerialUSB.begin(0);  // Begin SerialUSB communication
   while(!SerialUSB);  // Wait for SerialUSB to be ready
   start_marker[0] = START_MARKER_VALUE;  // Set start marker
@@ -272,6 +312,20 @@ void loop(){
       // Enable experimental 10 kHz output for external charge pump on D53
       configurePWM();      
     }
+    else if (serial_input_buffer.startsWith("SETSERIAL")) {
+      uint16_t serial_number = serial_input_buffer.substring(10).toInt();
+      setSerial(serial_number);
+    }
+    else if (serial_input_buffer.startsWith("GETSERIAL")) {
+      uint16_t serial_number = getSerial();
+      String serial_number_str = String(serial_number) + "\n";
+      SerialUSB.print(serial_number_str);
+    }
+    else if (serial_input_buffer.startsWith("*IDN?")) {
+      String device_id_str = getDeviceId();
+      SerialUSB.print(device_id_str);
+    }
+
   }
 
   // Wait for the next ADC DMA packet

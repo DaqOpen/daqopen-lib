@@ -382,6 +382,7 @@ class DueDaq(object):
     Attributes:
         MCLK: MCU Clock Frequency.
         CONV_CYCLES_PER_SAMPLE: Clock cycles per ADC conversion.
+        ADC_PRESCAL_MAX: Limit of ADC prescaler value
         MAX_BUFFER_SIZE: Maximum DMA buffer size for ADC cyclic buffer in cumulative samples.
         MIN_BUFFER_SIZE: Minimum DMA buffer size for ADC cyclic buffer in cumulative samples.
         MAX_BUFFER_DURATION: Maximum time duration of the buffer for responsiveness.
@@ -426,6 +427,7 @@ class DueDaq(object):
     """
     MCLK: int = 84_000_000
     CONV_CYCLES_PER_SAMPLE: int = 21
+    ADC_PRESCAL_MAX = 255
     MAX_BUFFER_SIZE: int = 20000
     MIN_BUFFER_SIZE: int = 1000
     MAX_BUFFER_DURATION: float = 0.05 # maximum size of buffer in seconds
@@ -443,7 +445,7 @@ class DueDaq(object):
     def __init__(self,
                  channels: list[str] = ["A0"], 
                  reset_pin: int = None, 
-                 serial_port_name: str = "",
+                 serial_port_name: int |str = "",
                  samplerate: float = 50000.0, 
                  differential: bool = False, 
                  gain: str | DueDaqGain = DueDaqGain.SGL_1X,
@@ -485,7 +487,14 @@ class DueDaq(object):
         self._adc_channels = channels
         self._wanted_samplerate = samplerate
         self._realtime_sim = realtime_sim
-        self._serial_port_name = serial_port_name
+        if isinstance(serial_port_name, str):
+            self._serial_port_name = serial_port_name
+            self._bind_serial_number = None
+        elif isinstance(serial_port_name, int):
+            self._serial_port_name = None
+            self._bind_serial_number = serial_port_name
+        else:
+            raise TypeError("No valid type for serial_port_name")
         self._differential = differential
         if not isinstance(gain, DueDaqGain):
             gain = DueDaqGain[gain]
@@ -515,7 +524,11 @@ class DueDaq(object):
         """
         # Calculate prescaler
         self._adc_prescal = int(self.MCLK/(self._wanted_samplerate*len(self._adc_channels)*self.CONV_CYCLES_PER_SAMPLE*2)-1)
-        self.samplerate = int(self.MCLK/((1+self._adc_prescal)*2*self.CONV_CYCLES_PER_SAMPLE*len(self._adc_channels)))
+        self._adc_prescal = min(self._adc_prescal, self.ADC_PRESCAL_MAX)
+        self._adc_prescal = max(self._adc_prescal, 1) # Minimum PRESCAL for stable use is 1
+        self.samplerate = self.MCLK/((1+self._adc_prescal)*2*self.CONV_CYCLES_PER_SAMPLE*len(self._adc_channels))
+        if self.samplerate != self._wanted_samplerate:
+            logger.warning(f"Samplerate could not be set to {self._wanted_samplerate:f}. Using {self.samplerate:f} instead")
         # Calculate optimum buffer size
         optimum_buffer_size = int(self.samplerate * self.MAX_BUFFER_DURATION * len(self._adc_channels))
         if (optimum_buffer_size * len(self._adc_channels)) > self.MAX_BUFFER_SIZE:
@@ -528,13 +541,12 @@ class DueDaq(object):
         self._buffer_blocksize = self.NUM_BYTES_PER_SAMPLE*(len(self._adc_channels)*self._samples_per_block_channel)+self.NUM_BYTES_PKG_CNT+len(self.START_PATTERN)
         # Initialize Interface
         if not self._serial_port_name:
-            serial_port_name = self._find_serial_port_name() # Update the actual serial port name
+            self._serial_port = self._bind_device() # Update the actual serial port name
+        elif self._serial_port_name != "SIM":
+            self._serial_port = serial.Serial(self.serial_port_name, timeout=1)
         else:
-            serial_port_name = self._serial_port_name
-        if self._serial_port_name == "SIM":
             self._serial_port = DueSerialSim(self._realtime_sim)
-        else:
-            self._serial_port = serial.Serial(serial_port_name, timeout=1)
+        
         self._read_buffer = bytearray(self._buffer_blocksize)
         self._num_frames_read = 0
         self.daq_data = np.zeros((self._samples_per_block_channel, len(self._adc_channels)), dtype="int16")
@@ -562,7 +574,7 @@ class DueDaq(object):
         self._serial_port.write((f"SETGAIN {self._gain.value:d}\n").encode())
         logger.info("DueDaq Init Done")
 
-    def _find_serial_port_name(self):
+    def _bind_device(self):
         """Find the serial port name of the connected Arduino Due device.
 
         Searches for a connected Arduino Due by checking serial ports for the Vendor ID (VID) 
@@ -578,7 +590,23 @@ class DueDaq(object):
         for port in ports_avail:
             if port.vid == 0x2341 and port.pid == 0x003e:
                 logger.info(f"Device found on Port: {port.device:s}")
-                return port.device
+                try:
+                    serial_port = serial.Serial(port.device, timeout=1)
+                    serial_port.write("*IDN?\n".encode("utf-8"))
+                    device_id = serial_port.readline().decode().strip()
+                    if device_id.startswith("DueDaq"):
+                        _, duedaq_version, device_serial_number = device_id.split(",")
+                        if (int(device_serial_number) == self._bind_serial_number) or (self._bind_serial_number is None):
+                            self._serial_number = int(device_serial_number)
+                            logger.info(f"DueDaq with serial {device_serial_number} on {port.device:s}")
+                            return serial_port
+                    else:
+                        logger.warning(f"Not a DueDaq on: {port.device:s}")
+                except TimeoutError:
+                    logger.warning("No Answer, not sure if device is DueDaq, but still binding")
+                    return serial_port
+                except IOError:
+                    logger.warning(f"Device already in use: {port.device:s}")
         raise DeviceNotFoundException("DueDaq")
 
     def start_acquisition(self):
