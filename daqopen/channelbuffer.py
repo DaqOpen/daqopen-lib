@@ -398,7 +398,7 @@ class DataChannelBuffer(object):
         else:
             return self._data[start_arr_idx:stop_arr_idx], self._acq_sidx[start_arr_idx:stop_arr_idx]
     
-    def read_agg_data_by_acq_sidx(self, start_idx, stop_idx, include_next=False):
+    def read_agg_data_by_acq_sidx(self, start_idx, stop_idx, include_next=False) -> float | list:
         """
         Retrieves aggregated data from the buffer based on acquisition indices.
 
@@ -412,11 +412,11 @@ class DataChannelBuffer(object):
         """
         data, ts = self.read_data_by_acq_sidx(start_idx, stop_idx, include_next=include_next)
         if len(data) == 0:
-            return np.nan
+            ret_val = np.nan
         elif self.agg_type == 'rms':
-            return np.sqrt(np.sum(np.power(data,2),axis=0)/len(data))
+            ret_val = np.sqrt(np.sum(np.power(data,2),axis=0)/len(data))
         elif self.agg_type == 'max':
-            return data.max(axis=0)
+            ret_val = data.max(axis=0)
         elif self.agg_type == 'phi':
             phi_sum = (data[data<0] + 360).sum()
             phi_sum += data[data >=0].sum()
@@ -425,6 +425,10 @@ class DataChannelBuffer(object):
                 phi -= 360
             elif phi <= -180:
                 phi += 360
-            return phi
+            ret_val = phi
         else:
-            return data.mean(axis=0)
+            ret_val = data.mean(axis=0)
+        if isinstance(ret_val, np.ndarray):
+            return ret_val.tolist()
+        elif isinstance(ret_val, (np.float64, np.float32)):
+            return float(ret_val)
