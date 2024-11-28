@@ -92,10 +92,11 @@ class AcqBufferPool(object):
         Creates an `AcqBuffer` for each channel defined in `daq_info`, adjusting for 
         channel-specific delays and applying gain and offset settings.
         """
-        delay_list = [channel.delay for _,channel in self._daq_info.channel.items()]
+        channels_with_sensor = self._daq_info.get_channel_info_with_sensor()
+        delay_list = [channel.delay for _,channel in channels_with_sensor.items()]
         max_delay = max(delay_list)
         self.channel = {}
-        for channel_name, channel_info in self._daq_info.channel.items():
+        for channel_name, channel_info in channels_with_sensor.items():
             self.channel[channel_name] = AcqBuffer(size=self._buffer_size, 
                                                    scale_gain=channel_info.gain, 
                                                    scale_offset=channel_info.offset, 

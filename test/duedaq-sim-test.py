@@ -1,5 +1,11 @@
 import unittest
+import sys
+import os
 import numpy as np
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.dirname(SCRIPT_DIR))
+
 from daqopen.duedaq import DueDaq
 
 class TestDueDaqSim(unittest.TestCase):

@@ -55,6 +55,7 @@ class InputInfo:
         delay (int): The delay in sample periods for this channel.
         unit (str): The unit of the measurement.
         ai_pin (str): The analog input pin name (e.g., "A0").
+        sensor (str): Name of sensor used
 
     Examples:
         >>> input_info = InputInfo(gain=2.0, offset=1.0, delay=5, unit="V", ai_pin="A0")
@@ -64,6 +65,7 @@ class InputInfo:
     delay: int = 0
     unit: str = "V"
     ai_pin: str = ""
+    sensor: str = ""
 
 @dataclass
 class BoardInfo:
@@ -126,7 +128,7 @@ class DaqInfo(object):
         >>> }
         >>> myDaqInfo = DaqInfo.from_dict(info_dict)
     """
-    def __init__(self, board_info: BoardInfo, channel_info: Dict[str, InputInfo]):
+    def __init__(self, board_info: BoardInfo, channel_info: Dict[str, InputInfo], sensor_info: Dict[str, InputInfo] = {}):
         """Initialize the DaqInfo instance with the specified board and channel information.
 
         Sets up the DAQ configuration, mapping channel names to their analog-to-digital (AD) indices 
@@ -155,6 +157,7 @@ class DaqInfo(object):
                 ch_info.ai_pin = ch_name
             self.channel_name[self.ai_pin_name[ch_name]] = ch_name
         self.channel = channel_info
+        self.sensor = sensor_info
 
     @classmethod
     def from_dict(cls, data: dict):
@@ -192,6 +195,7 @@ class DaqInfo(object):
         """
         board_info = BoardInfo(**data["board"])
         channel_info = {}
+        sensor_info = {}
         for ch_name, ch_info in data["channel"].items():
             if not ch_info.get("enabled", True):
                 continue
@@ -199,8 +203,15 @@ class DaqInfo(object):
                                               offset=ch_info.get("offset", 0.0), 
                                               delay=ch_info.get("delay", 0), 
                                               unit=ch_info.get("unit","V"), 
-                                              ai_pin = ch_info.get("ai_pin",""))
-        return cls(board_info=board_info, channel_info=channel_info)
+                                              ai_pin = ch_info.get("ai_pin",""),
+                                              sensor=ch_info.get("sensor",""))
+        if "sensor" in data:
+            for sensor_name, sensor in data["sensor"].items():
+                sensor_info[sensor_name] = InputInfo(gain=sensor.get("gain", 1.0), 
+                                                offset=sensor.get("offset", 0.0),
+                                                delay=sensor.get("delay", 0), 
+                                                unit=sensor.get("unit","V"))
+        return cls(board_info=board_info, channel_info=channel_info, sensor_info=sensor_info)
 
     @classmethod
     def get_default(cls):
@@ -227,28 +238,57 @@ class DaqInfo(object):
         channel_info = {}
         for ch_name, ch_info in self.channel.items():
             channel_info[ch_name] = ch_info.__dict__
-        return {"board": self.board.__dict__, "channel": channel_info}
+        sensor_info = {}
+        if self.sensor:
+            for sensor_name, sensor in self.sensor.items():
+                sensor_info[sensor_name] = sensor.__dict__
+        return {"board": self.board.__dict__, "channel": channel_info, "sensor": sensor_info}
 
-    def apply_sensor_to_channel(self, ch_name: str, sensor_info: InputInfo):
+    def _apply_sensor_to_channel(self, channel_info: InputInfo, sensor_info: InputInfo) -> InputInfo:
         """Apply sensor configuration to a specific channel.
 
-        Adjusts the gain, offset, and delay of the specified channel based on the provided 
+        Merges the gain, offset, and delay of the specified channel based on the provided 
         sensor information. The sensor's configuration is combined with the existing channel 
         configuration.
 
         Parameters:
-            ch_name: The name of the channel to which the sensor configuration is applied.
+            channel_info: An `InputInfo` instance containing the channels configuration.
             sensor_info: An `InputInfo` instance containing the sensor's configuration.
 
+        Returns:
+            InputInfo representing the combination of channel and sensor
+
         Examples:
+            >>> channel_info = InputInfo(gain=1.0)
             >>> sensor_info = InputInfo(gain=2.0, offset=1.0, delay=0)
-            >>> daq_info.apply_sensor_to_channel("U1", sensor_info)
+            >>> daq_info.apply_sensor_to_channel(channel_info, sensor_info)
         """
-        self.channel[ch_name].gain *= sensor_info.gain
-        self.channel[ch_name].offset *= sensor_info.gain
-        self.channel[ch_name].offset += sensor_info.offset
-        self.channel[ch_name].delay += sensor_info.delay
-        self.channel[ch_name].unit = sensor_info.unit
+        result_channel = InputInfo()
+        result_channel.gain = channel_info.gain * sensor_info.gain
+        result_channel.offset = channel_info.offset * sensor_info.gain
+        result_channel.offset += sensor_info.offset
+        result_channel.delay = channel_info.delay + sensor_info.delay
+        result_channel.unit = sensor_info.unit
+        return result_channel
+
+    def get_channel_info_with_sensor(self):
+        """Apply sensors to channels
+
+        Apply the sensor data to the channel's InputInfo.
+
+        Raises:
+            ValueError: If sensor can't be found
+        """
+        channel_info_with_sensor = {}
+        for ch_name, ch_info in self.channel.items():
+            if ch_info.sensor:
+                try:
+                    channel_info_with_sensor[ch_name] = self._apply_sensor_to_channel(ch_info, self.sensor[ch_info.sensor])
+                except KeyError:
+                    raise ValueError("Sensor not found:", ch_info.sensor)
+            else:
+                channel_info_with_sensor[ch_name] = ch_info
+        return channel_info_with_sensor
 
     def __str__(self) -> str:
         """Return a string representation of the DaqInfo instance.
@@ -273,5 +313,5 @@ if __name__ == "__main__":
                  "channel": {"U1": {"gain": 1.0, "offset": 1.0, "delay": 1, "unit": "V", "ai_pin": "A0"},
                              "U2": {"gain": 2.0, "offset": 2.0, "delay": 2, "unit": "V", "ai_pin": "A1"}}}
     myDaqInfo = DaqInfo.from_dict(info_dict)
-    myDaqInfo.apply_sensor_to_channel("U1", InputInfo(2, 1, 0))
+    myDaqInfo._apply_sensor_to_channel("U1", InputInfo(2, 1, 0))
     print(myDaqInfo.to_dict())

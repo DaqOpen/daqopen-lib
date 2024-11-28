@@ -158,7 +158,7 @@ class TestDataChannelBuffer(unittest.TestCase):
         Test reading aggregated data with no matching indices.
         """
         result = self.buffer.read_agg_data_by_acq_sidx(100, 200)
-        self.assertTrue(np.isnan(result))
+        self.assertIsNone(result)
 
 if __name__ == "__main__":
     unittest.main()
