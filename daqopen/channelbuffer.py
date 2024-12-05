@@ -31,6 +31,7 @@ Classes:
 import numpy as np
 from .daqinfo import DaqInfo
 from copy import deepcopy
+from typing import Tuple
 
 class AcqBufferPool(object):
     """
@@ -322,12 +323,12 @@ class DataChannelBuffer(object):
         else:
             self._data = np.zeros((size, sample_dimension), dtype=np.float64)
         self._acq_sidx = np.zeros(size, dtype=np.int64) - 1 # Mark Data as Invalid
-        self.sample_count = 0
-        self.last_write_idx = 0
-        self.last_sample_value = 0
-        self.last_sample_acq_sidx = 0
+        self.sample_count: int = 0
+        self.last_write_idx: int = 0
+        self.last_sample_value: int = 0
+        self.last_sample_acq_sidx: int = 0
     
-    def put_data_single(self, acq_sidx: int, value: float | np.float64 | np.ndarray):
+    def put_data_single(self, acq_sidx: int, value: float | np.float64 | np.ndarray) -> int:
         """
         Inserts a single data sample into the buffer.
 
@@ -351,14 +352,44 @@ class DataChannelBuffer(object):
         self.last_sample_acq_sidx = acq_sidx
         return self.sample_count
     
-    def read_data_by_acq_sidx(self, start_idx: int, stop_idx: int, include_next=False):
+    def put_data_multi(self, acq_sidx: np.ndarray, values: np.ndarray) -> int:
+        """
+        Inserts multiple data samples into the buffer.
+
+        Parameters:
+            acq_sidx: Acquisition index or timestamp of the sample.
+            value: The data sample to insert.
+
+        Returns:
+            int: Updated sample count in the buffer.
+        """
+        # Split data into two parts if remaining buffer size is smaller than data
+        if self.last_write_idx+len(values) > len(self._data):
+            buffer_size_left = len(self._data) - self.last_write_idx
+            remaining_size = len(values) - buffer_size_left
+            self._data[self.last_write_idx:] = values[:buffer_size_left]
+            self._acq_sidx[self.last_write_idx:] = acq_sidx[:buffer_size_left]
+            self._data[:remaining_size] = values[buffer_size_left:]
+            self._acq_sidx[:remaining_size] = acq_sidx[buffer_size_left:]
+            self.last_write_idx = remaining_size
+        else:
+            self._data[self.last_write_idx:self.last_write_idx+len(values)] = values
+            self._acq_sidx[self.last_write_idx:self.last_write_idx+len(values)] = acq_sidx
+            self.last_write_idx += len(values)
+        self.sample_count += len(values)
+
+        self.last_sample_value = values[-1]
+        self.last_sample_acq_sidx = acq_sidx[-1]
+        return self.sample_count
+    
+    def read_data_by_acq_sidx(self, start_idx: int, stop_idx: int, include_next: bool=False) -> Tuple[np.ndarray, np.ndarray]:
         """
         Reads data samples from the buffer based on acquisition indices.
 
         Parameters:
             start_idx: Start acquisition index.
             stop_idx: Stop acquisition index.
-            include_next: If True, includes the next sample after the stop index. Defaults to False.
+            include_next: If True, includes the next sample after the stop index and excludes first if many. Defaults to False.
 
         Returns:
             tuple: A tuple containing the data and acq_sidx.
@@ -381,7 +412,7 @@ class DataChannelBuffer(object):
                 stop_arr_idx -= len(self._acq_sidx)
         return self._read_data_by_idx(start_arr_idx, stop_arr_idx)
     
-    def _read_data_by_idx(self, start_arr_idx: int, stop_arr_idx: int):
+    def _read_data_by_idx(self, start_arr_idx: int, stop_arr_idx: int) -> Tuple[np.ndarray, np.ndarray]:
         """
         Internal method to retrieve data by array indices.
 
@@ -399,14 +430,14 @@ class DataChannelBuffer(object):
         else:
             return self._data[start_arr_idx:stop_arr_idx], self._acq_sidx[start_arr_idx:stop_arr_idx]
     
-    def read_agg_data_by_acq_sidx(self, start_idx, stop_idx, include_next=False) -> float | list:
+    def read_agg_data_by_acq_sidx(self, start_idx: int, stop_idx: int, include_next: bool=False) -> float | list:
         """
         Retrieves aggregated data from the buffer based on acquisition indices.
 
         Parameters:
             start_idx: Start acquisition index.
             stop_idx: Stop acquisition index.
-            include_next: If True, includes the next sample after the stop index. Defaults to False.
+            include_next: If True, includes the next sample after the stop index and excludes first if many. Defaults to False.
 
         Returns:
             float | np.ndarray: The aggregated data based on the specified aggregation type.
@@ -433,3 +464,5 @@ class DataChannelBuffer(object):
             return ret_val.tolist()
         elif isinstance(ret_val, (np.float64, np.float32)):
             return float(ret_val)
+        elif isinstance(ret_val, (np.int32, np.int64)):
+            return int(ret_val)

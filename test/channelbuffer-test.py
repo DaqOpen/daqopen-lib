@@ -91,6 +91,22 @@ class TestDataChannelBuffer(unittest.TestCase):
         self.assertEqual(self.buffer.last_sample_acq_sidx, 1)
         self.assertTrue((self.buffer._data[0] == 2.0))
 
+    def test_put_data_multi(self):
+        """
+        Test inserting multiple data sample into the buffer.
+        """
+        self.buffer.put_data_multi(np.array([1,2,3,4,5]), np.array([1,2,3,4,5])*2)
+        self.assertEqual(self.buffer.sample_count, 5)
+        self.assertEqual(self.buffer.last_sample_value, 10.0)
+        self.assertEqual(self.buffer.last_sample_acq_sidx, 5)
+        self.assertTrue((self.buffer._data[3] == 8.0))
+
+        self.buffer.put_data_multi(np.array([6,7,8,9,10,11]), np.array([6,7,8,9,10,11])*2)
+        self.assertEqual(self.buffer.sample_count, 11)
+        self.assertEqual(self.buffer.last_sample_value, 22.0)
+        self.assertEqual(self.buffer.last_sample_acq_sidx, 11)
+        self.assertTrue((self.buffer._data[0] == 22.0))
+
     def test_circular_buffer_behavior(self):
         """
         Test circular buffer overwriting when the buffer is full.
@@ -108,10 +124,21 @@ class TestDataChannelBuffer(unittest.TestCase):
         Test reading data by acquisition indices.
         """
         for i in range(5):
-            self.buffer.put_data_single(i, float(i * 10))
-        data, ts = self.buffer.read_data_by_acq_sidx(1, 4)
-        np.testing.assert_array_equal(data, [10.0, 20.0, 30.0])
-        np.testing.assert_array_equal(ts, [1, 2, 3])
+            self.buffer.put_data_single((i * 10), i)
+        data, ts = self.buffer.read_data_by_acq_sidx(0, 40)
+        np.testing.assert_array_equal(data, [0.0, 1.0, 2.0, 3.0])
+        np.testing.assert_array_equal(ts, [0, 10, 20, 30])
+
+    def test_read_data_by_acq_sidx_2(self):
+        """
+        Test reading data by acquisition indices.
+        """
+        self.buffer.put_data_single(999, 1)
+        self.buffer.put_data_single(1000, 2)
+        self.buffer.put_data_single(1999, 3)
+        data, ts = self.buffer.read_data_by_acq_sidx(0, 1000)
+        np.testing.assert_array_equal(data, [1.0])
+        np.testing.assert_array_equal(ts, [999])
 
     def test_read_data_wraparound(self):
         """
