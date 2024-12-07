@@ -140,6 +140,21 @@ class TestDataChannelBuffer(unittest.TestCase):
         np.testing.assert_array_equal(data, [1.0])
         np.testing.assert_array_equal(ts, [999])
 
+    def test_read_data_by_acq_sidx_include_next(self):
+        """
+        Test reading data by acquisition indices and include next=True
+        """
+        self.buffer.put_data_single(1001, 1)
+        self.buffer.put_data_single(2001, 2)
+        self.buffer.put_data_single(3001, 3)
+
+        data, ts = self.buffer.read_data_by_acq_sidx(900, 1000, include_next=True)
+        np.testing.assert_array_equal(data, [1.0])
+        np.testing.assert_array_equal(ts, [1001])
+        data, ts = self.buffer.read_data_by_acq_sidx(1002, 1100, include_next=True)
+        np.testing.assert_array_equal(data, [])
+        np.testing.assert_array_equal(ts, [])
+
     def test_read_data_wraparound(self):
         """
         Test reading data when the circular buffer has wrapped around.
@@ -156,7 +171,7 @@ class TestDataChannelBuffer(unittest.TestCase):
         """
         for i in range(5):
             self.buffer.put_data_single(i, float(i))
-        result = self.buffer.read_agg_data_by_acq_sidx(1, 5)
+        result, _ = self.buffer.read_agg_data_by_acq_sidx(1, 5)
         expected_rms = np.sqrt(np.mean(np.square([1.0, 2.0, 3.0, 4.0])))
         self.assertAlmostEqual(result, expected_rms)
 
@@ -167,7 +182,7 @@ class TestDataChannelBuffer(unittest.TestCase):
         buffer = DataChannelBuffer(name="MaxBuffer", size=10, sample_dimension=1, agg_type="max")
         for i in range(5):
             buffer.put_data_single(i, float(i))
-        result = buffer.read_agg_data_by_acq_sidx(1, 5)
+        result, _ = buffer.read_agg_data_by_acq_sidx(1, 5)
         self.assertEqual(result, 4.0)
 
     def test_read_agg_data_mean(self):
@@ -177,14 +192,14 @@ class TestDataChannelBuffer(unittest.TestCase):
         buffer = DataChannelBuffer(name="MeanBuffer", size=10, sample_dimension=1, agg_type=None)
         for i in range(5):
             buffer.put_data_single(i, float(i))
-        result = buffer.read_agg_data_by_acq_sidx(1, 5)
+        result, _ = buffer.read_agg_data_by_acq_sidx(1, 5)
         self.assertEqual(result, 2.5)
 
     def test_read_agg_data_empty(self):
         """
         Test reading aggregated data with no matching indices.
         """
-        result = self.buffer.read_agg_data_by_acq_sidx(100, 200)
+        result, _ = self.buffer.read_agg_data_by_acq_sidx(100, 200)
         self.assertIsNone(result)
 
 if __name__ == "__main__":

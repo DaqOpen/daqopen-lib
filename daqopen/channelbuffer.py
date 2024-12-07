@@ -407,10 +407,8 @@ class DataChannelBuffer(object):
         # Add also next sample into the result array if requested (and exclude first, if many)
         if include_next:
             sidx_diff = stop_idx - start_idx # length of requested interval
-            idx_to_include = stop_arr_idx if self._acq_sidx[stop_arr_idx] == stop_idx else stop_arr_idx_p1
+            idx_to_include = stop_arr_idx if self._acq_sidx[stop_arr_idx] >= stop_idx else stop_arr_idx_p1
             if stop_idx <= self._acq_sidx[idx_to_include] < (stop_idx + sidx_diff // 2): # Include next only if half of requested interval after
-                if stop_arr_idx != start_arr_idx:
-                    start_arr_idx += 1 # exclude first element
                 if (stop_arr_idx + 1 <= self.last_write_idx) or (stop_arr_idx > self.last_write_idx): # There is an element after stop
                     stop_arr_idx += 1
                 if start_arr_idx >= len(self._acq_sidx):
@@ -468,8 +466,10 @@ class DataChannelBuffer(object):
         else:
             ret_val = data.mean(axis=0)
         if isinstance(ret_val, np.ndarray):
-            return ret_val.tolist()
+            return ret_val.tolist(), ts[-1]
         elif isinstance(ret_val, (np.float64, np.float32)):
-            return float(ret_val)
+            return float(ret_val), ts[-1]
         elif isinstance(ret_val, (np.int32, np.int64)):
-            return int(ret_val)
+            return int(ret_val), ts[-1]
+        else:
+            return None, None
