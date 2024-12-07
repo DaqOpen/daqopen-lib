@@ -400,16 +400,23 @@ class DataChannelBuffer(object):
         stop_arr_idx = self._acq_sidx[self.last_write_idx:].searchsorted(stop_idx) + self.last_write_idx
         if stop_arr_idx == len(self._acq_sidx):
             stop_arr_idx = self._acq_sidx[:self.last_write_idx].searchsorted(stop_idx)
+        # Real Array Index of next sample after Stop
+        stop_arr_idx_p1 = stop_arr_idx + 1
+        if stop_arr_idx_p1 >= len(self._acq_sidx):
+            stop_arr_idx_p1 -= len(self._acq_sidx)
         # Add also next sample into the result array if requested (and exclude first, if many)
         if include_next:
-            if stop_arr_idx != start_arr_idx:
-                start_arr_idx += 1
-            if (stop_arr_idx + 1 <= self.last_write_idx) or (stop_arr_idx > self.last_write_idx):
-                stop_arr_idx += 1
-            if start_arr_idx >= len(self._acq_sidx):
-                start_arr_idx -= len(self._acq_sidx)
-            if stop_arr_idx >= len(self._acq_sidx):
-                stop_arr_idx -= len(self._acq_sidx)
+            sidx_diff = stop_idx - start_idx # length of requested interval
+            idx_to_include = stop_arr_idx if self._acq_sidx[stop_arr_idx] == stop_idx else stop_arr_idx_p1
+            if stop_idx <= self._acq_sidx[idx_to_include] < (stop_idx + sidx_diff // 2): # Include next only if half of requested interval after
+                if stop_arr_idx != start_arr_idx:
+                    start_arr_idx += 1 # exclude first element
+                if (stop_arr_idx + 1 <= self.last_write_idx) or (stop_arr_idx > self.last_write_idx): # There is an element after stop
+                    stop_arr_idx += 1
+                if start_arr_idx >= len(self._acq_sidx):
+                    start_arr_idx -= len(self._acq_sidx)
+                if stop_arr_idx >= len(self._acq_sidx):
+                    stop_arr_idx -= len(self._acq_sidx)
         return self._read_data_by_idx(start_arr_idx, stop_arr_idx)
     
     def _read_data_by_idx(self, start_arr_idx: int, stop_arr_idx: int) -> Tuple[np.ndarray, np.ndarray]:
