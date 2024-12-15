@@ -145,15 +145,28 @@ class TestDataChannelBuffer(unittest.TestCase):
         Test reading data by acquisition indices and include next=True
         """
         self.buffer.put_data_single(1001, 1)
-        self.buffer.put_data_single(2001, 2)
-        self.buffer.put_data_single(3001, 3)
-
         data, ts = self.buffer.read_data_by_acq_sidx(900, 1000, include_next=True)
         np.testing.assert_array_equal(data, [1.0])
         np.testing.assert_array_equal(ts, [1001])
         data, ts = self.buffer.read_data_by_acq_sidx(1002, 1100, include_next=True)
         np.testing.assert_array_equal(data, [])
         np.testing.assert_array_equal(ts, [])
+        self.buffer.put_data_single(2001, 2)
+        self.buffer.put_data_single(3001, 3)
+
+    def test_read_agg_data_by_acq_sidx_include_next(self):
+        """
+        Test reading data by acquisition indices and include next=True
+        """
+        self.buffer.put_data_single(1001, 1)
+        data, ts = self.buffer.read_agg_data_by_acq_sidx(900, 1000, include_next=True)
+        np.testing.assert_array_equal(data, [1.0])
+        np.testing.assert_array_equal(ts, [1001])
+        data, ts = self.buffer.read_agg_data_by_acq_sidx(1002, 1100, include_next=True)
+        np.testing.assert_array_equal(data, [])
+        np.testing.assert_array_equal(ts, [])
+        self.buffer.put_data_single(2001, 2)
+        self.buffer.put_data_single(3001, 3)
 
     def test_read_data_wraparound(self):
         """

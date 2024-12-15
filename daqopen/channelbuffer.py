@@ -323,6 +323,7 @@ class DataChannelBuffer(object):
         else:
             self._data = np.zeros((size, sample_dimension), dtype=np.float64)
         self._acq_sidx = np.zeros(size, dtype=np.int64) - 1 # Mark Data as Invalid
+        self._sample_dimension = sample_dimension
         self.sample_count: int = 0
         self.last_write_idx: int = 0
         self.last_sample_value: int = 0
@@ -449,7 +450,10 @@ class DataChannelBuffer(object):
         """
         data, ts = self.read_data_by_acq_sidx(start_idx, stop_idx, include_next=include_next)
         if len(data) == 0:
-            ret_val = np.nan
+            if self._sample_dimension == 1:
+                ret_val = np.nan
+            else:
+                ret_val = []
         elif self.agg_type == 'rms':
             ret_val = np.sqrt(np.sum(np.power(data,2),axis=0)/len(data))
         elif self.agg_type == 'max':
@@ -471,5 +475,7 @@ class DataChannelBuffer(object):
             return float(ret_val), ts[-1]
         elif isinstance(ret_val, (np.int32, np.int64)):
             return int(ret_val), ts[-1]
+        elif isinstance(ret_val, list) and len(ret_val) == 0:
+            return ret_val, None
         else:
             return None, None
