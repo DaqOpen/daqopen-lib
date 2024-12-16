@@ -515,7 +515,7 @@ class DueDaq(object):
         """
         # Calculate prescaler
         self._adc_prescal = int(self.MCLK/(self._wanted_samplerate*len(self._adc_channels)*self.CONV_CYCLES_PER_SAMPLE*2)-1)
-        self.samplerate = int(self.MCLK/((1+self._adc_prescal)*2*self.CONV_CYCLES_PER_SAMPLE*len(self._adc_channels)))
+        self.samplerate = self.MCLK/((1+self._adc_prescal)*2*self.CONV_CYCLES_PER_SAMPLE*len(self._adc_channels))
         # Calculate optimum buffer size
         optimum_buffer_size = int(self.samplerate * self.MAX_BUFFER_DURATION * len(self._adc_channels))
         if (optimum_buffer_size * len(self._adc_channels)) > self.MAX_BUFFER_SIZE:

@@ -12,11 +12,11 @@ class TestDueDaqSim(unittest.TestCase):
 
     def setUp(self):
         """Set up the DueDaq instance using simulation mode before each test."""
-        self.channels = ["A0", "A1", "A2"]  # Test with multiple channels
+        self.channels = ["A0", "A1", "A2", "A3", "A4", "A5"]  # Test with multiple channels
         self.daq = DueDaq(
             channels=self.channels,
             serial_port_name="SIM",  # Use simulation mode
-            samplerate=10000.0,  # Desired sample rate for testing
+            samplerate=50000.0,  # Desired sample rate for testing
             differential=False,  # Single-ended mode
             gain="SGL_1X",  # Default gain
             offset_enabled=False,  # No offset mode
@@ -29,6 +29,7 @@ class TestDueDaqSim(unittest.TestCase):
         self.daq.start_acquisition()  # Start the acquisition
         self.assertEqual(self.daq._acq_state, "running")  # Ensure acquisition is running
         self.assertGreaterEqual(self.daq._num_frames_read, 0)  # Check that frames have started reading
+        self.assertAlmostEqual(self.daq.samplerate, 55555.555555555555)
         self.daq.stop_acquisition()
         self.assertEqual(self.daq._acq_state, "stopped")  # Ensure acquisition has stopped
 
