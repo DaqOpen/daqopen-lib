@@ -304,7 +304,7 @@ class DataChannelBuffer(object):
         read_agg_data_by_acq_sidx(start_idx, stop_idx, include_next=False):
             Retrieves aggregated data from the buffer based on acquisition indices.
     """
-    def __init__(self, name: str, size: int = 5000, sample_dimension: int = 1, agg_type: str = None, unit: str = ''):
+    def __init__(self, name: str, size: int = 5000, sample_dimension: int = 1, agg_type: str = None, unit: str = '', agg_function=None, *args, **kwargs):
         """
         Initializes a DataChannelBuffer instance.
 
@@ -314,10 +314,14 @@ class DataChannelBuffer(object):
             sample_dimension: Dimension of each sample. Defaults to 1.
             agg_type: Type of aggregation to apply ('rms', 'max', 'phi'). Defaults to None.
             unit: Unit of the data. Defaults to an empty string.
+            agg_function: custom function use for aggregation
         """
         self.name = name
         self.unit = unit
         self.agg_type = agg_type
+        self.agg_function = agg_function
+        self.agg_function_args = args
+        self.agg_function_kwargs = kwargs
         if sample_dimension==1:
             self._data = np.zeros(size, dtype=np.float64)
         else:
@@ -468,7 +472,10 @@ class DataChannelBuffer(object):
                 phi += 360
             ret_val = phi
         else:
-            ret_val = data.mean(axis=0)
+            if self.agg_function:
+                ret_val = self.agg_function(data, *self.agg_function_args, **self.agg_function_kwargs)
+            else:
+                ret_val = data.mean(axis=0)
         if isinstance(ret_val, np.ndarray):
             return ret_val.tolist(), ts[-1]
         elif isinstance(ret_val, (np.float64, np.float32)):
