@@ -304,7 +304,7 @@ class DataChannelBuffer(object):
         read_agg_data_by_acq_sidx(start_idx, stop_idx, include_next=False):
             Retrieves aggregated data from the buffer based on acquisition indices.
     """
-    def __init__(self, name: str, size: int = 5000, sample_dimension: int = 1, agg_type: str = None, unit: str = '', agg_function=None, *args, **kwargs):
+    def __init__(self, name: str, size: int = 5000, sample_dimension: int = 1, dtype: np.dtype = np.float32, agg_type: str = None, unit: str = '', agg_function=None, *args, **kwargs):
         """
         Initializes a DataChannelBuffer instance.
 
@@ -313,6 +313,7 @@ class DataChannelBuffer(object):
             size: Size of the buffer. Defaults to 5000.
             sample_dimension: Dimension of each sample. Defaults to 1.
             agg_type: Type of aggregation to apply ('rms', 'max', 'phi'). Defaults to None.
+            dtype: Data type of value array (timestamps are always int64)
             unit: Unit of the data. Defaults to an empty string.
             agg_function: custom function use for aggregation
         """
@@ -323,9 +324,9 @@ class DataChannelBuffer(object):
         self.agg_function_args = args
         self.agg_function_kwargs = kwargs
         if sample_dimension==1:
-            self._data = np.zeros(size, dtype=np.float64)
+            self._data = np.zeros(size, dtype=dtype)
         else:
-            self._data = np.zeros((size, sample_dimension), dtype=np.float64)
+            self._data = np.zeros((size, sample_dimension), dtype=dtype)
         self._acq_sidx = np.zeros(size, dtype=np.int64) - 1 # Mark Data as Invalid
         self._sample_dimension = sample_dimension
         self.sample_count: int = 0
@@ -333,7 +334,7 @@ class DataChannelBuffer(object):
         self.last_sample_value: int = 0
         self.last_sample_acq_sidx: int = 0
     
-    def put_data_single(self, acq_sidx: int, value: float | np.float64 | np.ndarray) -> int:
+    def put_data_single(self, acq_sidx: int, value: float | np.float64 | np.float32 | np.ndarray) -> int:
         """
         Inserts a single data sample into the buffer.
 
