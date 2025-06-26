@@ -331,7 +331,10 @@ class DataChannelBuffer(object):
         self._sample_dimension = sample_dimension
         self.sample_count: int = 0
         self.last_write_idx: int = 0
-        self.last_sample_value: int = 0
+        if dtype in [np.float32, np.float64]:
+            self.last_sample_value: float = 0.0
+        else:
+            self.last_sample_value: int = 0
         self.last_sample_acq_sidx: int = 0
     
     def put_data_single(self, acq_sidx: int, value: float | np.float64 | np.float32 | np.ndarray) -> int:
@@ -354,7 +357,7 @@ class DataChannelBuffer(object):
             self._data[self.last_write_idx] = value
             self.last_write_idx += 1
         self.sample_count += 1
-        self.last_sample_value = value
+        self.last_sample_value = self._data[self.last_write_idx-1]
         self.last_sample_acq_sidx = acq_sidx
         return self.sample_count
     
@@ -411,7 +414,7 @@ class DataChannelBuffer(object):
         if stop_arr_idx_p1 >= len(self._acq_sidx):
             stop_arr_idx_p1 -= len(self._acq_sidx)
         # Add also next sample into the result array if requested (and exclude first, if many)
-        if include_next:
+        if include_next and stop_arr_idx < len(self._acq_sidx):
             sidx_diff = stop_idx - start_idx # length of requested interval
             idx_to_include = stop_arr_idx if self._acq_sidx[stop_arr_idx] >= stop_idx else stop_arr_idx_p1
             if stop_idx <= self._acq_sidx[idx_to_include] < (stop_idx + sidx_diff // 2): # Include next only if half of requested interval after
@@ -419,7 +422,7 @@ class DataChannelBuffer(object):
                     stop_arr_idx += 1
                 if start_arr_idx >= len(self._acq_sidx):
                     start_arr_idx -= len(self._acq_sidx)
-                if stop_arr_idx >= len(self._acq_sidx):
+                if stop_arr_idx > len(self._acq_sidx):
                     stop_arr_idx -= len(self._acq_sidx)
         return self._read_data_by_idx(start_arr_idx, stop_arr_idx)
     

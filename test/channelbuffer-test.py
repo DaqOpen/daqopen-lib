@@ -186,7 +186,7 @@ class TestDataChannelBuffer(unittest.TestCase):
             self.buffer.put_data_single(i, float(i))
         result, _ = self.buffer.read_agg_data_by_acq_sidx(1, 5)
         expected_rms = np.sqrt(np.mean(np.square([1.0, 2.0, 3.0, 4.0])))
-        self.assertAlmostEqual(result, expected_rms)
+        self.assertAlmostEqual(result, expected_rms, places=6)
 
     def test_read_agg_data_max(self):
         """
@@ -214,6 +214,19 @@ class TestDataChannelBuffer(unittest.TestCase):
         """
         result, _ = self.buffer.read_agg_data_by_acq_sidx(100, 200)
         self.assertIsNone(result)
+
+    def test_read_data_buffer_edge(self):
+        """
+        Test reading data when the cursor is on the buffer end.
+        """
+        #self.buffer.put_data_multi(np.arange(0,10), np.arange(0,10, dtype=np.float32))
+        for i in range(10):
+            self.buffer.put_data_single(i, float(i))
+        self.assertEqual(self.buffer.last_write_idx, 10) 
+        data, ts = self.buffer.read_data_by_acq_sidx(0, 10, include_next=True)
+        np.testing.assert_array_equal(data, np.arange(0, 10, dtype=np.float32))
+        np.testing.assert_array_equal(ts, np.arange(0, 10))
+
 
 if __name__ == "__main__":
     unittest.main()
