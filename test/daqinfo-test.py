@@ -33,7 +33,8 @@ class TestDaqInfo(unittest.TestCase):
                 "gain": "SGL_X1",
                 "offset_enabled": True,
                 "adc_range": (0, 4095),
-                "adc_clock_gain": 0.9998
+                "adc_clock_gain": 0.9998,
+                "adc_delay_seconds": 0.00046
             },
             "channel": {
                 "ch1": {"gain": 2.0, "offset": 1.0, "delay": 10, "unit": "A", "ai_pin": "A0"},
