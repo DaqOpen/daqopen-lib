@@ -29,9 +29,9 @@ Classes:
 """
 
 import numpy as np
-from .daqinfo import DaqInfo
+from .daqinfo import DaqInfo, InputInfo
 from copy import deepcopy
-from typing import Tuple
+from typing import Tuple, List
 
 class AcqBufferPool(object):
     """
@@ -93,7 +93,7 @@ class AcqBufferPool(object):
         Creates an `AcqBuffer` for each channel defined in `daq_info`, adjusting for 
         channel-specific delays and applying gain and offset settings.
         """
-        channels_with_sensor = self._daq_info.get_channel_info_with_sensor()
+        channels_with_sensor: List[InputInfo] = self._daq_info.get_channel_info_with_sensor()
         delay_list = [channel.delay for _,channel in channels_with_sensor.items()]
         max_delay = max(delay_list)
         self.channel = {}
@@ -102,7 +102,8 @@ class AcqBufferPool(object):
                                                    scale_gain=channel_info.gain, 
                                                    scale_offset=channel_info.offset, 
                                                    sample_delay=max_delay-channel_info.delay,
-                                                   name=channel_name)
+                                                   name=channel_name,
+                                                   freq_response=channel_info.freq_response)
     
     def _prepare_time_buffer(self, start_timestamp: int):
         """Prepare the time buffer for storing timestamps.
@@ -186,7 +187,7 @@ class AcqBufferPool(object):
 
 
 class AcqBuffer(object):
-    def __init__(self, size: int=100000, scale_gain: float = 1.0, scale_offset: float = 0.0, sample_delay: int = 0, dtype: np.dtype = np.float32, name: str=None):
+    def __init__(self, size: int=100000, scale_gain: float = 1.0, scale_offset: float = 0.0, sample_delay: int = 0, dtype: np.dtype = np.float32, name: str=None, freq_response: tuple=()):
         """Initialize the AcqBuffer instance for buffering acquired data in a cyclic manner.
 
         Sets up a cyclic buffer with the specified size, data type, scaling, and offset 
@@ -206,8 +207,9 @@ class AcqBuffer(object):
         self.scale_gain = scale_gain
         self.scale_offset = scale_offset
         self.sample_delay = sample_delay
-        self.last_sample_value = 0
         self.name = name
+        self.freq_response = freq_response
+        self.last_sample_value = 0
         
     def put_data(self, data: np.array) -> int:
         """Add data to the buffer in a cyclic manner.
