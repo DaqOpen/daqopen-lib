@@ -37,7 +37,7 @@ class TestDaqInfo(unittest.TestCase):
                 "adc_delay_seconds": 0.00046
             },
             "channel": {
-                "ch1": {"gain": 2.0, "offset": 1.0, "delay": 10, "unit": "A", "ai_pin": "A0"},
+                "ch1": {"gain": 2.0, "offset": 1.0, "delay": 10, "unit": "A", "ai_pin": "A0", "freq_response": ((50.0, 1.0), (1000, 0.9))},
                 "ch2": {"gain": 1.5, "offset": 0.5, "delay": 5, "unit": "V", "ai_pin": "A1"},
             }
         }

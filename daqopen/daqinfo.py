@@ -56,6 +56,7 @@ class InputInfo:
         unit (str): The unit of the measurement.
         ai_pin (str): The analog input pin name (e.g., "A0").
         sensor (str): Name of sensor used
+        freq_response: Frequency response, tuple of (Hz, attenuation) tuples
 
     Examples:
         >>> input_info = InputInfo(gain=2.0, offset=1.0, delay=5, unit="V", ai_pin="A0")
@@ -66,6 +67,7 @@ class InputInfo:
     unit: str = "V"
     ai_pin: str = ""
     sensor: str = ""
+    freq_response: tuple = ()
 
 @dataclass
 class BoardInfo:
@@ -206,13 +208,15 @@ class DaqInfo(object):
                                               delay=ch_info.get("delay", 0), 
                                               unit=ch_info.get("unit","V"), 
                                               ai_pin = ch_info.get("ai_pin",""),
-                                              sensor=ch_info.get("sensor",""))
+                                              sensor=ch_info.get("sensor",""),
+                                              freq_response=tuple(tuple(inner) for inner in ch_info.get("freq_response",())))
         if "sensor" in data:
             for sensor_name, sensor in data["sensor"].items():
                 sensor_info[sensor_name] = InputInfo(gain=sensor.get("gain", 1.0), 
                                                 offset=sensor.get("offset", 0.0),
                                                 delay=sensor.get("delay", 0), 
-                                                unit=sensor.get("unit","V"))
+                                                unit=sensor.get("unit","V"),
+                                                freq_response=tuple(tuple(inner) for inner in ch_info.get("freq_response",())))
         return cls(board_info=board_info, channel_info=channel_info, sensor_info=sensor_info)
 
     @classmethod
