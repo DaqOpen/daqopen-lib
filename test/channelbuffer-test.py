@@ -208,6 +208,27 @@ class TestDataChannelBuffer(unittest.TestCase):
         result, _ = buffer.read_agg_data_by_acq_sidx(1, 5)
         self.assertEqual(result, 2.5)
 
+    def test_read_agg_data_phi_0(self):
+        """
+        Test reading phi aggregated data near zero
+        """
+        buffer = DataChannelBuffer(name="MeanBuffer", size=10, sample_dimension=1, agg_type="phi")
+        for i in range(5):
+            buffer.put_data_single(i, float(i-2.5))
+        result, _ = buffer.read_agg_data_by_acq_sidx(1, 5)
+        self.assertEqual(result, 0)
+
+    def test_read_agg_data_phi_180(self):
+        """
+        Test reading phi aggregated data near +-180°
+        """
+        buffer = DataChannelBuffer(name="MeanBuffer", size=10, sample_dimension=1, agg_type="phi")
+        for i in range(5):
+            buffer.put_data_single(i, float(i-182.5))
+        result, _ = buffer.read_agg_data_by_acq_sidx(1, 5)
+        self.assertEqual(result, 0)
+
+
     def test_read_agg_data_empty(self):
         """
         Test reading aggregated data with no matching indices.

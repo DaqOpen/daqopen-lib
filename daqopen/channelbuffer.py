@@ -469,8 +469,9 @@ class DataChannelBuffer(object):
         elif self.agg_type == 'max':
             ret_val = data.max(axis=0)
         elif self.agg_type == 'phi':
-            phi_sum = (data[data<0] + 360).sum()
-            phi_sum += data[data >=0].sum()
+            phi_sum = (data[data<=-180] + 360).sum()
+            phi_sum += (data[data>180] -360).sum()
+            phi_sum += (data[(data<=180) & (data>-180)]).sum()
             phi = phi_sum / len(data)
             if phi > 180:
                 phi -= 360
